@@ -30,3 +30,8 @@ Future:
     - apply server-wide space limits for packets
 - Full set of security requirements
     - syslogging 
+
+9 Oct 2024
+Developed:
+- Spent the whole morning fighting with clippy
+- A framework for automating integration tests against the server.

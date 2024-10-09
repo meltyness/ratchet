@@ -4,4 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-md5 = "0.7.0"   
+md5 = "0.7.0"
+
+[lints.rust]
+renamed_and_removed_lints = { level = "allow", priority = 0 }
+dead_code = "allow"
+unused_variables = "allow"
+non_camel_case_types = "allow"

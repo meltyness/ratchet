@@ -32,7 +32,7 @@ struct RTKnownClient {
 
 //}
 
-fn main() {
+pub fn main() {
     let server_settings = RTServerSettings::new(65535);
     println!("Ratchet Info: starting...");
     // let test_pak = RTHeader {    
@@ -50,19 +50,17 @@ fn main() {
 
     match listener {
         Ok(_) => println!("Ratchet Info: bound to some port 49"),
-        Err(E) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", E, get_user_name()),
+        Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, get_user_name()),
     }
 
     let listener=listener.unwrap();
 
     for stream in listener.incoming() {
         let mut stream = stream.unwrap();
-        let hdr: RTHeader;
-        let decoded: RTDecodedPacket;
 
         // Stage 1: Parse header, establish session
         let my_hdr = RTHeader::parse_init_header(&mut stream);
-        hdr = match my_hdr { 
+        let hdr: RTHeader = match my_hdr { 
             Err(e) => {
                 println!("Ratchet Error: {}", e);
                 continue;
@@ -80,7 +78,7 @@ fn main() {
             RTTACType::TAC_PLUS_ACCT => todo!(),
         };
 
-        decoded = match contents {
+        let decoded: RTDecodedPacket = match contents {
             Err(e) => { println!("Ratchet Error: {}", e); continue }
             Ok(d) => {
                 //println!("Ratchet Debug: Processed {:#?}", d); 
@@ -92,7 +90,7 @@ fn main() {
         match decoded {
             RTDecodedPacket::RTAuthenPacket(ap) => match ap {
                 RTAuthenPacket::RTAuthenStartPacket(asp) => println!("Ratchet Info: Decoded: {}", asp),
-                _=> println!("Unknown Authen Packet Format"),
+                // _ => println!("Unknown Authen Packet Format"),
             }
             _ => println!("Unknown Packet Format"),
         }
