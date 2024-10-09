@@ -39,12 +39,13 @@ pub struct RTHeader {
 
 impl RTHeader {
     pub fn get_expected_packet_length(&self) -> usize {
-        match self.tacp_hdr_length.try_into() { Ok(l) => l, _ => return 0}
+        self.tacp_hdr_length.try_into().unwrap_or_default()
     }
 
     pub fn parse_init_header(stream: &mut TcpStream) -> Result<Self, &str> {
         let mut hdr_buf: [u8; TACP_HEADER_MAX_LENGTH] = [0u8; TACP_HEADER_MAX_LENGTH];
-        stream.read_exact(&mut hdr_buf);
+        
+        if stream.read_exact(&mut hdr_buf).is_err() { return Err("Segment too short, check client implementation.") }
         
         // TODO: Check overrun
         //println!("Ratchet Debug : Full packet contents: {:#x?}", hdr_buf);
@@ -60,14 +61,16 @@ impl RTHeader {
         };
 
         println!("Ratchet Debug: Parsed header: {:#?}", ret);
-        return Ok(ret);
+        Ok(ret)
     }
 
     pub fn parse_authen_packet(&self, stream: &mut TcpStream, key: &str) -> Result<RTDecodedPacket, &str> {
-        let mut md5pad = self.compute_md5_pad(key).expect("");
+        let md5pad = self.compute_md5_pad(key).expect("");
 
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
-        stream.read_exact(&mut pck_buf);
+
+        if stream.read_exact(&mut pck_buf).is_err() { return Err("Segment too short, check client implementation.") }
+
         let pck_buf = md5_xor(&pck_buf, &md5pad);
 
         // println!("Ratchet Debug: Decoded packet contents: {:#x?}", pck_buf);
@@ -78,7 +81,7 @@ impl RTHeader {
         let usn_end = RT_AUTHENTICATION_START_PACKET_INDEXES.data_len + (ret.user_len as usize);
         println!("Ratchet Debug: Remaining packet data: {:?}", String::from_utf8(pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.data_len+1..usn_end].to_vec()));
         
-        return Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenStartPacket(ret)));
+        Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenStartPacket(ret)))
     }
 
     pub fn compute_md5_pad(&self, key: &str) -> Result<Vec<u8>, &str> {
@@ -86,7 +89,7 @@ impl RTHeader {
         let mut md5ctx = md5::Context::new();
         md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
         md5ctx.consume(key);
-        md5ctx.consume(&[self.tacp_hdr_version.clone() as u8]);
+        md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
         md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
 
         let mut md5pad = md5ctx.compute().to_vec();
@@ -97,7 +100,7 @@ impl RTHeader {
             let mut md5ctx = md5::Context::new();
             md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
             md5ctx.consume(key);
-            md5ctx.consume(&[self.tacp_hdr_version.clone() as u8]);
+            md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
             md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
             md5ctx.consume(md5last.clone());
 
@@ -107,7 +110,8 @@ impl RTHeader {
 
         //println!("Ratchet Debug: Computed key {:#x?}", md5pad);
         md5pad.truncate(self.get_expected_packet_length());
-        return Ok(md5pad);
+
+        Ok(md5pad)
     }
 }
 
@@ -191,26 +195,26 @@ pub struct RTAuthenStartPacket {
 
 impl std::fmt::Display for RTAuthenStartPacket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RTAuthenStartPacket {{\n")?;
-        write!(f, "    action: {:?},\n", self.action)?;
-        write!(f, "    priv_lvl: {},\n", self.priv_lvl)?;
-        write!(f, "    authen_type: {:?},\n", self.authen_type)?;
-        write!(f, "    authen_service: {:?},\n", self.authen_service)?;
-        write!(f, "    user_len: {},\n", self.user_len)?;
-        write!(f, "    port_len: {},\n", self.port_len)?;
-        write!(f, "    rem_addr_len: {},\n", self.rem_addr_len)?;
-        write!(f, "    data_len: {},\n", self.data_len)?;
-        write!(f, "    user: \"{:?}\",\n", String::from_utf8(self.user.clone()))?;
-        write!(f, "    port: \"{:?}\",\n", String::from_utf8(self.port.clone()))?;
-        write!(f, "    rem_addr: \"{:?}\",\n", String::from_utf8(self.rem_addr.clone()))?;
-        write!(f, "    data: \"{:?}\",\n", String::from_utf8(self.data.clone()))?;
-        write!(f, "}}")
+        writeln!(f, "RTAuthenStartPacket {{")?;
+        writeln!(f, "    action: {:?},", self.action)?;
+        writeln!(f, "    priv_lvl: {},", self.priv_lvl)?;
+        writeln!(f, "    authen_type: {:?},", self.authen_type)?;
+        writeln!(f, "    authen_service: {:?},", self.authen_service)?;
+        writeln!(f, "    user_len: {},", self.user_len)?;
+        writeln!(f, "    port_len: {},", self.port_len)?;
+        writeln!(f, "    rem_addr_len: {},", self.rem_addr_len)?;
+        writeln!(f, "    data_len: {},", self.data_len)?;
+        writeln!(f, "    user: \"{:?}\",", String::from_utf8(self.user.clone()))?;
+        writeln!(f, "    port: \"{:?}\",", String::from_utf8(self.port.clone()))?;
+        writeln!(f, "    rem_addr: \"{:?}\",", String::from_utf8(self.rem_addr.clone()))?;
+        writeln!(f, "    data: \"{:?}\",", String::from_utf8(self.data.clone()))?;
+        writeln!(f, "}}")
     }
 }
 
 const RT_AUTH_TEXT_START: usize = RT_AUTHENTICATION_START_PACKET_INDEXES.data_len + 1;
 impl RTAuthenStartPacket {
-    pub fn from_raw_packet(pck_buf : &Vec<u8>) -> Result<RTAuthenStartPacket, &str> {
+    pub fn from_raw_packet(pck_buf : &[u8]) -> Result<RTAuthenStartPacket, &str> {
         let ret = RTAuthenStartPacket {
             action: RTAuthenPacketAction::from_byte(pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.action])?,
             priv_lvl: pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.priv_level],
@@ -241,7 +245,7 @@ impl RTAuthenStartPacket {
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.rem_addr_len] as usize)..].to_vec(),
         };
 
-        return Ok(ret);
+        Ok(ret)
     }
 }
 
@@ -306,7 +310,7 @@ struct RTAuthenSess {
     rt_my_sessid : u32,
 }
 
-pub fn md5_xor(msg: &Vec<u8> , pad: &Vec<u8>) -> Vec<u8> {
+pub fn md5_xor(msg: &[u8], pad: &[u8]) -> Vec<u8> {
     // Determine the length of the shorter of the two vectors
     let len = msg.len().min(pad.len());
     
