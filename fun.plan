@@ -1,0 +1,3 @@
+- Integration tests across a spectrum of devices and TACACS Clients using, say, GNS3...
+- Consider a possible method to maximize the efficacy of different keys in thwarting attacks on the md5 pad.
+  - or really the theoretical basis for whether the md5 pad is insecure to begin with. 
