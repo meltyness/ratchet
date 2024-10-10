@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -7,12 +8,12 @@ use std::time::Duration;
 fn end_to_end_test_authentication() {
     // Start the server
     let mut child = Command::new("cargo")
-        .args(&["run", "--release", "--bin", "ratchet"])
+        .args(&["run", "--release", "--bin", "ratchet", "--", "--add-insecure-test-credential-do-not-use"])
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to start ratchet application");
 
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(2));
 
     match child.try_wait() {
         Ok(Some(status)) => {
@@ -36,6 +37,8 @@ fn end_to_end_test_authentication() {
         .output()
         .expect("Failed to execute perl script");
 
+    thread::sleep(Duration::from_secs(2));
+
     // Convert the output to a String
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -43,10 +46,16 @@ fn end_to_end_test_authentication() {
     if !stdout.contains("Success!") {
         // If not, assert false to indicate the test has failed
         let _ = child.kill().expect("Failed to kill the ratchet application");
-        assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {}", stdout, stderr);
+        
+        let mut server_msg= String::new();
+        match child.stdout.take().unwrap().read_to_string(&mut server_msg){
+            Ok(_) => (),
+            Err(e) => assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output: none available\n", stdout, stderr),
+        }
+        assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output {}\n", stdout, stderr, server_msg);
     }
     // Pause for 30 seconds
-    thread::sleep(Duration::from_secs(1));
+    thread::sleep(Duration::from_secs(2));
 
     // Kill the server
     let _ = child.kill().expect("Failed to kill the ratchet application");
