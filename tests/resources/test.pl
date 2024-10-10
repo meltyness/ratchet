@@ -1,11 +1,18 @@
 use Authen::TacacsPlus;
 
+my $password_to_use = "123456";
+
+if($ARGV[0] eq "negative") {
+	$password_to_use = "1234567"
+}
+
 $tac = new Authen::TacacsPlus(Host=>"127.0.0.1",
 			      Key=>"testing123",
 			      Port=>'44449',
 			      Timeout=>15);
 
-if ($tac->authen("usn", "123456", 2)) {
+
+if ($tac->authen("username", $password_to_use, 2)) {
 	print "Success!\n";
 	$tac->close();
 	exit;
