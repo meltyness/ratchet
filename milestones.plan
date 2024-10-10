@@ -56,9 +56,10 @@ Debt:
 - maybe test can use a fakeport, find a freebie on the build machine
 
 Future:
-- Figure out how to implement the ASCII one
-- Figure out how to implement the CHAP one
 - Server configuration, user database, keys database
     - apply server-wide space limits for packets
+    - first driver: get-csv command, default to "cat database.txt"
 - Full set of security requirements
     - syslogging 
+- Figure out how to implement the ASCII one
+- Figure out how to implement the CHAP one
