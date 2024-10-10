@@ -35,3 +35,30 @@ Future:
 Developed:
 - Spent the whole morning fighting with clippy
 - A framework for automating integration tests against the server.
+- ah, so it did need to mutate, and i didn't really expect it to, hm.
+    - so that fixes the bug...
+- An additional integration test to respond to failed authentication attempts appropriately.
+
+Debt:
+- error handling is inconsistent
+    - there's not any real anchor for "secret doesn't match"
+    - the rfc sort of just writes this off...?
+    - code structure contains oversights:
+- pick a better structure for implementing RTAuthenStartPacket::from_raw_packet
+    - it's,... something's off with that.
+    - what determines that packet typing, is it the session state?
+    - is there some way that the packet types can effectively be made two-way?
+    - index struct should be replicated for the Header, for simplicity
+    - do we want a serialization library?
+- server a bit ugly
+    - choose a pattern other than imperative i think, so when this sould be policy controlled
+        it can be handled succinctly.
+- maybe test can use a fakeport, find a freebie on the build machine
+
+Future:
+- Figure out how to implement the ASCII one
+- Figure out how to implement the CHAP one
+- Server configuration, user database, keys database
+    - apply server-wide space limits for packets
+- Full set of security requirements
+    - syslogging 

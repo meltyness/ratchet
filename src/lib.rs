@@ -38,6 +38,31 @@ pub struct RTHeader {
 }
 
 impl RTHeader {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut result = vec![
+            self.tacp_hdr_version.clone() as u8,
+            self.tacp_hdr_type.clone() as u8,
+            self.tacp_hdr_seqno,
+            self.tacp_hdr_flags,
+        ];
+
+        result.extend(&self.tacp_hdr_sesid.to_be_bytes());
+        result.extend(&self.tacp_hdr_length.to_be_bytes());
+
+        result
+    }
+
+    pub fn get_resp_header(ses : u32, lt : u32) -> RTHeader {
+        RTHeader {
+            tacp_hdr_version: RTTACVersion::TAC_PLUS_MINOR_VER_ONE,
+            tacp_hdr_type: RTTACType::TAC_PLUS_AUTHEN,
+            tacp_hdr_seqno: 2,
+            tacp_hdr_flags: 0,
+            tacp_hdr_sesid: ses,
+            tacp_hdr_length: lt,
+        }
+    }
+
     pub fn get_expected_packet_length(&self) -> usize {
         self.tacp_hdr_length.try_into().unwrap_or_default()
     }
@@ -65,11 +90,13 @@ impl RTHeader {
     }
 
     pub fn parse_authen_packet(&self, stream: &mut TcpStream, key: &str) -> Result<RTDecodedPacket, &str> {
-        let md5pad = self.compute_md5_pad(key).expect("");
+        let md5pad = self.compute_md5_pad(key);
 
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
 
         if stream.read_exact(&mut pck_buf).is_err() { return Err("Segment too short, check client implementation.") }
+
+        println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
 
         let pck_buf = md5_xor(&pck_buf, &md5pad);
 
@@ -84,7 +111,7 @@ impl RTHeader {
         Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenStartPacket(ret)))
     }
 
-    pub fn compute_md5_pad(&self, key: &str) -> Result<Vec<u8>, &str> {
+    pub fn compute_md5_pad(&self, key: &str) -> Vec<u8> {
         // Determine MD5 pad-key thing
         let mut md5ctx = md5::Context::new();
         md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
@@ -105,13 +132,13 @@ impl RTHeader {
             md5ctx.consume(md5last.clone());
 
             md5last = md5ctx.compute().to_vec();
-            md5pad.append(&mut md5last);
+            md5pad.extend(&md5last);
         }
 
         //println!("Ratchet Debug: Computed key {:#x?}", md5pad);
-        md5pad.truncate(self.get_expected_packet_length());
+        md5pad.truncate(self.tacp_hdr_length.try_into().unwrap());
 
-        Ok(md5pad)
+        md5pad
     }
 }
 
@@ -153,6 +180,7 @@ pub enum RTDecodedPacket {
 #[derive(Debug)]
 pub enum RTAuthenPacket {
     RTAuthenStartPacket(RTAuthenStartPacket),
+    RTAuthenReplyPacket(RTAuthenReplyPacket),
 }
 
 pub struct RTAuthenStartPacketIndexes {
@@ -187,10 +215,10 @@ pub struct RTAuthenStartPacket {
     port_len : u8,
     rem_addr_len : u8,
     data_len : u8,
-    user : Vec<u8>,
+    pub user : Vec<u8>,
     port : Vec<u8>,
     rem_addr : Vec<u8>,
-    data : Vec<u8>,
+    pub data : Vec<u8>,
 }
 
 impl std::fmt::Display for RTAuthenStartPacket {
@@ -206,8 +234,8 @@ impl std::fmt::Display for RTAuthenStartPacket {
         writeln!(f, "    data_len: {},", self.data_len)?;
         writeln!(f, "    user: \"{:?}\",", String::from_utf8(self.user.clone()))?;
         writeln!(f, "    port: \"{:?}\",", String::from_utf8(self.port.clone()))?;
-        writeln!(f, "    rem_addr: \"{:?}\",", String::from_utf8(self.rem_addr.clone()))?;
-        writeln!(f, "    data: \"{:?}\",", String::from_utf8(self.data.clone()))?;
+        writeln!(f, "    rem_addr: \"{:?}\",", String::from_utf8_lossy(&self.rem_addr.clone()))?;
+        writeln!(f, "    data: \"{:?}\",", String::from_utf8_lossy(&self.data.clone()))?;
         writeln!(f, "}}")
     }
 }
@@ -215,6 +243,7 @@ impl std::fmt::Display for RTAuthenStartPacket {
 const RT_AUTH_TEXT_START: usize = RT_AUTHENTICATION_START_PACKET_INDEXES.data_len + 1;
 impl RTAuthenStartPacket {
     pub fn from_raw_packet(pck_buf : &[u8]) -> Result<RTAuthenStartPacket, &str> {
+        println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
         let ret = RTAuthenStartPacket {
             action: RTAuthenPacketAction::from_byte(pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.action])?,
             priv_lvl: pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.priv_level],
@@ -225,20 +254,26 @@ impl RTAuthenStartPacket {
             rem_addr_len: pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.rem_addr_len],
             data_len: pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.data_len],
             user: pck_buf[RT_AUTH_TEXT_START..   // TODO: This doesn't seem right...
+
                         RT_AUTH_TEXT_START + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize)].to_vec(),
+
             port: pck_buf[RT_AUTH_TEXT_START + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize)..
+
                         RT_AUTH_TEXT_START + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize) +
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.port_len] as usize)].to_vec(),
-            rem_addr: pck_buf[RT_AUTH_TEXT_START + 
+
+            rem_addr: pck_buf[RT_AUTH_TEXT_START + //  "The rem_addr_len indicates the length of the user field, in bytes." wat
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize) +
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.port_len] as usize)..
+
                         RT_AUTH_TEXT_START + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize) + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.port_len] as usize) + 
-                        (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.rem_addr_len] as usize)].to_vec(),     
+                        (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.rem_addr_len] as usize)].to_vec(),
+
             data: pck_buf[RT_AUTH_TEXT_START + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.user_len] as usize) + 
                         (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.port_len] as usize) + 
@@ -274,7 +309,6 @@ pub enum RTAuthenPacketType {
     TAC_PLUS_AUTHEN_TYPE_MSCHAP = 0x05,
     TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 = 0x06,
 }
-
 impl_from_byte!(RTAuthenPacketType,
                 TAC_PLUS_AUTHEN_TYPE_PAP);
 
@@ -291,9 +325,73 @@ pub enum RTAuthenPacketService {
     TAC_PLUS_AUTHEN_SVC_NASI = 0x08,
     TAC_PLUS_AUTHEN_SVC_FWPROXY = 0x09,
 }
-
 impl_from_byte!(RTAuthenPacketService, 
     TAC_PLUS_AUTHEN_SVC_LOGIN);
+
+// RTAuthenReplyPacket
+pub struct RTAuthenReplyPacketIndexes {
+    status : usize,
+    flags : usize,
+    server_msg_len : usize,
+    data_len : usize,
+}
+
+const RT_AUTHENTICATION_REPLY_PACKET_INDEXES: RTAuthenReplyPacketIndexes = RTAuthenReplyPacketIndexes {
+    status: 0,
+    flags: 1,
+    server_msg_len: 2,
+    data_len: 3,
+};
+
+#[derive(Debug)]
+pub struct RTAuthenReplyPacket {
+    status : u8,
+    flags : u8,
+    server_msg_len : u16,
+    data_len : u16,
+    server_msg : Vec<u8>,
+    data : Vec<u8>,
+}
+
+impl RTAuthenReplyPacket {
+    pub fn get_success_packet() -> RTAuthenReplyPacket{
+        RTAuthenReplyPacket{
+            status: 1,
+            flags: 0,
+            server_msg_len: 0,
+            data_len: 0,
+            server_msg: vec![],
+            data: vec![],
+        }
+    }
+
+    pub fn get_fail_packet() -> RTAuthenReplyPacket{
+        RTAuthenReplyPacket{
+            status: 2,
+            flags: 0,
+            server_msg_len: 0,
+            data_len: 0,
+            server_msg: vec![],
+            data: vec![],
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+
+        // Serialize the fixed-size fields
+        result.push(self.status);
+        result.push(self.flags);
+        result.extend(&self.server_msg_len.to_be_bytes());
+        result.extend(&self.data_len.to_be_bytes());
+
+        // Serialize the variable-size fields
+        result.extend(&self.server_msg);
+        result.extend(&self.data);
+
+        result
+    }
+}
 
 #[derive(Debug)]
 pub struct RTAuthorPacket {
@@ -311,14 +409,13 @@ struct RTAuthenSess {
 }
 
 pub fn md5_xor(msg: &[u8], pad: &[u8]) -> Vec<u8> {
-    // Determine the length of the shorter of the two vectors
-    let len = msg.len().min(pad.len());
-    
+    assert!(msg.len() == pad.len());
+
     // Create a new vector to hold the result
-    let mut result = Vec::with_capacity(len);
+    let mut result = Vec::with_capacity(msg.len());
     
     // Perform the XOR operation byte by byte
-    for i in 0..len {
+    for i in 0..msg.len() {
         result.push(msg[i] ^ pad[i]);
     }
     

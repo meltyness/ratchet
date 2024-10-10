@@ -6,10 +6,13 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use std::net::TcpListener;
+use std::time::Duration;
+use std::{env, thread};
+use std::io::Write;
+use std::{collections::HashMap, net::TcpListener};
 use std::process::Command;
 
-use ratchet::{RTAuthenPacket, RTDecodedPacket, RTHeader, RTTACType};
+use ratchet::{md5_xor, RTAuthenPacket, RTAuthenReplyPacket, RTDecodedPacket, RTHeader, RTTACType};
 
 const SECRET_KEY: &str = "testing123"; // TODO: When building a red-black tree of clients, ensure that they are required to have a secret, or not clients.
 
@@ -35,16 +38,17 @@ struct RTKnownClient {
 pub fn main() {
     let server_settings = RTServerSettings::new(65535);
     println!("Ratchet Info: starting...");
-    // let test_pak = RTHeader {    
-    //     tacp_hdr_version : RTTACVersion::from_byte(0xc1).expect("huh?"),
-    //     tacp_hdr_type : RTTACType::from_byte(0x1).expect("huh?"),
-    //     tacp_hdr_seqno : 0, // 1-255, always rx odd tx even, session ends if a wrap occurs
-    //     tacp_hdr_flags : 0,
-    //     tacp_hdr_sesid : 0, // must be CSPRNG
-    //     tacp_hdr_length : 0,};
-    // Read Configuration
 
-    //println!("Ratchet Debug: Test packet: {:#?}", test_pak);
+    // Create a new HashMap
+    let mut credentials = HashMap::new();
+
+    // Get command-line arguments
+    let args: Vec<String> = env::args().collect();
+
+    // Check if the specific argument is present
+    if args.contains(&"--add-insecure-test-credential-do-not-use".to_string()) {
+        credentials.insert("username", "123456");
+    }
 
     let listener = TcpListener::bind("0.0.0.0:44449");
 
@@ -89,12 +93,71 @@ pub fn main() {
         // Stage 3: Decide what stuff to do depending on the type of packet.
         match decoded {
             RTDecodedPacket::RTAuthenPacket(ap) => match ap {
-                RTAuthenPacket::RTAuthenStartPacket(asp) => println!("Ratchet Info: Decoded: {}", asp),
+                RTAuthenPacket::RTAuthenStartPacket(asp) => {
+                    println!("Ratchet Info: Decoded: {}", asp);
+                    let username = String::from_utf8_lossy(&asp.user);
+                    let auth_request_password = String::from_utf8_lossy(&asp.data);
+                    let mut user_authenticated = false;
+
+                    println!("Ratchet Debug: Looking up {}", username);
+                    
+                    if let Some(&p) = credentials.get(username.as_ref()) {
+                        // User known, check authentication success.
+                        println!("Ratchet Debug: Found user with password: {}", p);
+                        println!("Attempting to compare {} to {}", p, auth_request_password);
+                        user_authenticated = p == auth_request_password;
+                    }
+
+                    if user_authenticated {
+                        let r = RTAuthenReplyPacket::get_success_packet();
+                        println!("Ratchet Debug: {username} Authenticated successfully, signalling client.");
+                        println!("Ratchet Debug: {:#?}", r);
+                        let length = r.serialize().len() as u32;
+                        println!("Ratchet Debug: Preparing packet with {length}");
+                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, length);
+                        println!("Ratchet Debug: {:#?}", resp_hdr);
+                        let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                        let mut payload = md5_xor(&r.serialize(), &pad);
+                        let mut msg = resp_hdr.serialize();
+                        msg.append(&mut payload);
+
+                        println!("{:?}", msg);
+                        // TODO: This blocks
+                        match stream.write(&msg) {
+                            Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                            Err(e) => {
+                                println!("Ratchet Error: TCP Error, {}", e);
+                            },
+                        }
+                    } else {
+                        let r = RTAuthenReplyPacket::get_fail_packet();
+                        println!("Ratchet Debug: {username} Authentication failed, signalling client.");
+                        println!("Ratchet Debug: {:#?}", r);
+                        let length = r.serialize().len() as u32;
+                        println!("Ratchet Debug: Preparing packet with {length}");
+                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, length);
+                        println!("Ratchet Debug: {:#?}", resp_hdr);
+                        let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                        let mut payload = md5_xor(&r.serialize(), &pad);
+                        let mut msg = resp_hdr.serialize();
+                        msg.append(&mut payload);
+
+                        println!("{:?}", msg);
+                        // TODO: This blocks
+                        match stream.write(&msg) {
+                            Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                            Err(e) => {
+                                println!("Ratchet Error: TCP Error, {}", e);
+                            },
+                        }
+                    }
+                },
+                RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { println!("Ratchet Error: umm... no, I'M the server."); continue },
                 // _ => println!("Unknown Authen Packet Format"),
             }
             _ => println!("Unknown Packet Format"),
         }
-
+        thread::sleep(Duration::from_secs(2));
         println!("Connection established!");
     }
 }
