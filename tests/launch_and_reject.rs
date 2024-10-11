@@ -1,8 +1,6 @@
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 #[test]
 fn end_to_end_test_auth_rejection() {
@@ -13,7 +11,28 @@ fn end_to_end_test_auth_rejection() {
         .spawn()
         .expect("Failed to start ratchet application");
 
-    thread::sleep(Duration::from_secs(2));
+        
+        let stdout = child.stdout.as_mut().expect("Failed to open stdout");
+        let reader = BufReader::new(stdout);
+        
+        // Loop to read output until "NOWLISTENING" appears
+        let mut now_listening = false;
+        
+        for line in reader.lines() {
+            match line {
+                Ok(output) => {
+                    println!("{}", output);
+                    if output.contains("NOWLISTENING") {
+                        now_listening = true;
+                        break; // Exit loop once we find "NOWLISTENING"
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error reading line: {}", e);
+                    break; // Exit loop on read error
+                },
+            }
+        }
 
     match child.try_wait() {
         Ok(Some(status)) => {
@@ -24,7 +43,10 @@ fn end_to_end_test_auth_rejection() {
             println!("Exited with {e}");
             assert!(false, "Server closed unexpectedly! {e}");
         },
-        Ok(None) => (), // this is fine
+        Ok(None) => {if now_listening {
+            println!("Server is now listening.");
+            } // this is fine
+        },
     }
 
     // Infer location of testing script
@@ -36,8 +58,6 @@ fn end_to_end_test_auth_rejection() {
         .args([&format!("{}/test.pl", d.display()), "negative"])
         .output()
         .expect("Failed to execute perl script");
-
-    thread::sleep(Duration::from_secs(2));
 
     // Convert the output to a String
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -54,8 +74,6 @@ fn end_to_end_test_auth_rejection() {
         }
         assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output {}\n", stdout, stderr, server_msg);
     }
-    // Pause for 30 seconds
-    thread::sleep(Duration::from_secs(2));
 
     // Kill the server
     let _ = child.kill().expect("Failed to kill the ratchet application");
