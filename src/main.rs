@@ -6,23 +6,34 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use std::time::Duration;
-use std::{env, thread};
-use std::io::Write;
-use std::{collections::HashMap, net::TcpListener};
+use std::env;
 use std::process::Command;
+use std::collections::HashMap;
+use std::net::TcpListener;
+use std::net::TcpStream;
+use std::io::Write;
 
-use ratchet::{md5_xor, RTAuthenPacket, RTAuthenReplyPacket, RTDecodedPacket, RTHeader, RTTACType};
+use precis_profiles::precis_core::profile::Profile;
+use precis_profiles::UsernameCasePreserved;
 
-const SECRET_KEY: &str = "testing123"; // TODO: When building a red-black tree of clients, ensure that they are required to have a secret, or not clients.
+use ratchet::RTHeader;
+use ratchet::RTTACType;
+use ratchet::RTAuthenPacket;
+use ratchet::md5_xor;
+use ratchet::RTDecodedPacket;
+use ratchet::RTAuthenReplyPacket;
+
+const SECRET_KEY: &str = "testing123"; // TODO: When building a red-black tree of clients, 
+                                    //ensure that they are required to have a secret, or not clients.
 
 struct RTServerSettings {
-    rt_server_max_length : u32 // = 65535, // https://www.rfc-editor.org/rfc/rfc8907.html#section-4.1-18
+    rt_server_max_length : u32, // = 65535, // https://www.rfc-editor.org/rfc/rfc8907.html#section-4.1-18
+    rt_server_i18n : bool
 }
 
 impl RTServerSettings {
-    fn new(rt_server_max_length: u32) -> Self {
-        Self { rt_server_max_length }
+    fn new(rt_server_max_length: u32, rt_server_i18n: bool) -> Self {
+        Self { rt_server_max_length, rt_server_i18n }
     }
 }
 
@@ -30,60 +41,91 @@ struct RTKnownClient {
 
 }
 
-// https://www.rfc-editor.org/rfc/rfc8265.html#section-3.4
-//impl USNCasePres {
-
-//}
-
+/// # Panics
+/// 
+/// Panics if the server cannot open on the specified hostaddr
+/// 
 pub fn main() {
-    let server_settings = RTServerSettings::new(65535);
+    let server_settings = RTServerSettings::new(65535, true);
     println!("Ratchet Info: starting...");
 
     // Create a new HashMap
     let mut credentials = HashMap::new();
 
-    // Get command-line arguments
-    let args: Vec<String> = env::args().collect();
-
     // Check if the specific argument is present
-    if args.contains(&"--add-insecure-test-credential-do-not-use".to_string()) {
+    if env::args().any(|x| x == *"--add-insecure-test-credential-do-not-use".to_string()) {
         credentials.insert("username", "123456");
     }
 
-    let listener = TcpListener::bind("0.0.0.0:44449");
+    let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
 
-    match listener {
-        Ok(_) => println!("Ratchet Info: bound to some port 49"),
-        Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, get_user_name()),
-    }
+    let listener = match TcpListener::bind("0.0.0.0:44449") {
+        Ok(l) => l,
+        #[allow(clippy::panic)] // this is definitely fatal for a server.
+        Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, rt_get_user_name()),
+    };
 
-    let listener=listener.unwrap();
+    let generic_error = RTAuthenReplyPacket::get_error_packet().serialize();
 
-    for stream in listener.incoming() {
-        let mut stream = stream.unwrap();
+    println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
-        // Stage 1: Parse header, establish session
-        let my_hdr = RTHeader::parse_init_header(&mut stream);
-        let hdr: RTHeader = match my_hdr { 
-            Err(e) => {
-                println!("Ratchet Error: {}", e);
+    for stream in listener.incoming() {        
+        // Stage 0: Check that this is a valid stream, produce some logs about the event.
+        let mut stream = match stream {
+            Ok(s) => { // TODO: Collect this into session info so that the following diagnostic logs can be associated
+                println!("Ratchet Info: Received connection request from {}", s.peer_addr()
+                                                                               .map_or("Unknown Address"
+                                                                               .to_string(), |addr| addr.to_string())); 
+                                                                                // it *doesn't* take two to tango?
+                println!("Ratchet Debug: Other connection info: Read Timeout: {:#?}, Write Timeout: {:#?}", s.read_timeout(),s.write_timeout());
+                match s.set_nodelay(true) {
+                    Ok(_) => (),
+                    Err(_) => {
+                        println!("Ratchet Debug: Couldn't disable Nagles for this Socket, proceeding anyway.");
+                    },
+                };
+                s // hand over the TcpStream
+            },
+            Err(e) => { 
+                println!("Ratchet Error: TCP Error, {}", e);
                 continue;
             },
+        };
+
+        // Stage 1: Parse header, establish session
+        let hdr: RTHeader = match RTHeader::parse_init_header(&mut stream) { 
             Ok(h) => {
                 //println!("Ratchet Debug: Processed {:#?}", h); 
                 h
+            },
+            Err(e) => {
+                println!("Ratchet Error: {}", e);
+                rt_send_error_packet(&generic_error, &mut stream);
+                continue;
             },
         };
 
         // Stage 2: Parse packet, perform appropriate treatment
         let contents = match hdr.tacp_hdr_type {
             RTTACType::TAC_PLUS_AUTHEN => hdr.parse_authen_packet(&mut stream, SECRET_KEY),
-            RTTACType::TAC_PLUS_AUTHOR => todo!(),
-            RTTACType::TAC_PLUS_ACCT => todo!(),
+            RTTACType::TAC_PLUS_AUTHOR => {
+                println!("Ratchet Debug: Not Implemented");
+                rt_send_error_packet(&generic_error, &mut stream);
+                continue;
+            },
+            RTTACType::TAC_PLUS_ACCT => {
+                println!("Ratchet Debug: Not Implemented");
+                rt_send_error_packet(&generic_error, &mut stream);
+                continue;
+            },
         };
 
         let decoded: RTDecodedPacket = match contents {
-            Err(e) => { println!("Ratchet Error: {}", e); continue }
+            Err(e) => { 
+                println!("Ratchet Error: {}", e); 
+                rt_send_error_packet(&generic_error, &mut stream);
+                continue; 
+            }
             Ok(d) => {
                 //println!("Ratchet Debug: Processed {:#?}", d); 
                 d
@@ -95,26 +137,43 @@ pub fn main() {
             RTDecodedPacket::RTAuthenPacket(ap) => match ap {
                 RTAuthenPacket::RTAuthenStartPacket(asp) => {
                     println!("Ratchet Info: Decoded: {}", asp);
-                    let username = String::from_utf8_lossy(&asp.user);
+                    let raw_username = String::from_utf8_lossy(&asp.user);
                     let auth_request_password = String::from_utf8_lossy(&asp.data);
                     let mut user_authenticated = false;
 
-                    println!("Ratchet Debug: Looking up {}", username);
+                    println!("Ratchet Debug: Looking up {}", raw_username);
+
+                    let username = if server_settings.rt_server_i18n {
+                        match username_case_preserved.prepare(raw_username) {
+                            Ok(fixed_username) => { 
+                                println!("Ratchet Debug: Looking up {}", fixed_username);
+                                fixed_username
+                            },
+                            Err(e) => {
+                                println!("Ratchet Error: Invalid username passed, {}", e);
+                                rt_send_error_packet(&generic_error, &mut stream);
+                                continue;
+                            },
+                        }
+                    } else {
+                        raw_username
+                    };
                     
                     if let Some(&p) = credentials.get(username.as_ref()) {
                         // User known, check authentication success.
                         println!("Ratchet Debug: Found user with password: {}", p);
                         println!("Attempting to compare {} to {}", p, auth_request_password);
                         user_authenticated = p == auth_request_password;
+                    } else {
+                        println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
+                        // user who? user not authenticated!
                     }
 
                     if user_authenticated {
                         let r = RTAuthenReplyPacket::get_success_packet();
                         println!("Ratchet Debug: {username} Authenticated successfully, signalling client.");
                         println!("Ratchet Debug: {:#?}", r);
-                        let length = r.serialize().len() as u32;
-                        println!("Ratchet Debug: Preparing packet with {length}");
-                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, length);
+                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r);
                         println!("Ratchet Debug: {:#?}", resp_hdr);
                         let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
                         let mut payload = md5_xor(&r.serialize(), &pad);
@@ -133,9 +192,7 @@ pub fn main() {
                         let r = RTAuthenReplyPacket::get_fail_packet();
                         println!("Ratchet Debug: {username} Authentication failed, signalling client.");
                         println!("Ratchet Debug: {:#?}", r);
-                        let length = r.serialize().len() as u32;
-                        println!("Ratchet Debug: Preparing packet with {length}");
-                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, length);
+                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r);
                         println!("Ratchet Debug: {:#?}", resp_hdr);
                         let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
                         let mut payload = md5_xor(&r.serialize(), &pad);
@@ -152,32 +209,47 @@ pub fn main() {
                         }
                     }
                 },
-                RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { println!("Ratchet Error: umm... no, I'M the server."); continue },
+                RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { 
+                    println!("Ratchet Error: umm... no, I'M the server.");
+                    rt_send_error_packet(&generic_error, &mut stream);
+                    continue; 
+                },
                 // _ => println!("Unknown Authen Packet Format"),
             }
-            _ => println!("Unknown Packet Format"),
+            _ => {
+                println!("Unknown Packet Format");
+                rt_send_error_packet(&generic_error, &mut stream);
+                continue;
+            },
         }
-        thread::sleep(Duration::from_secs(2));
-        println!("Connection established!");
+        
+        println!("Ratchet Info: Finished Processing!");
     }
 }
 
-// "Treatment of Enumerated Protocol Values" 
-fn drop_error() {
-
+fn rt_send_error_packet(msg: &[u8], stream: &mut TcpStream) {
+    // It's just a header, it shouldn't reveal anything interesting.
+    match stream.write(msg) {
+        Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+        Err(e) => {
+            println!("Ratchet Error: TCP Error, {}", e);
+        },
+    }
 }
 
-fn get_user_name() -> String {
-    let output = if cfg!(target_os = "windows") {
+fn rt_get_user_name() -> String {
+    return match if cfg!(target_os = "windows") {
         Command::new("cmd")
             .args(["/C", "whoami"])
             .output()
-            .expect("failed to determine username")
     } else {
         Command::new("sh")
             .args(["-c", "whoami"])
             .output()
-            .expect("failed to determine unix username")
+    } { 
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => {
+            return "Couldn't get username".to_string();
+        }
     };
-    return String::from_utf8(output.stdout).expect("Failed to determine username").trim_end().to_string();
 } 
