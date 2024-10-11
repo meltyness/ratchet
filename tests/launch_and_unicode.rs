@@ -3,22 +3,15 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[test]
-fn end_to_end_test_authentication() {
-    println!("{}", cfg!(debug_assertions));
-    let argslist = 
-    if cfg!(debug_assertions) {
-        vec!["run", "--", "--add-insecure-test-credential-do-not-use"]
-    } else {
-        vec!["run", "--release", "--", "--add-insecure-test-credential-do-not-use"]
-    };
-
+fn end_to_end_test_auth_unicode() {
     // Start the server
     let mut child = Command::new("cargo")
-        .args(argslist)
+        .args(&["run", "--release", "--bin", "ratchet", "--", "--add-insecure-test-credential-do-not-use"])
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to start ratchet application");
 
+    
         let stdout = child.stdout.as_mut().expect("Failed to open stdout");
         let reader = BufReader::new(stdout);
         
@@ -62,9 +55,10 @@ fn end_to_end_test_authentication() {
 
     // Run the Perl script and capture its output
     let output = Command::new("perl")
-        .arg(format!("{}/test.pl", d.display()))
+        .args([&format!("{}/test.pl", d.display()), "wat"])
         .output()
         .expect("Failed to execute perl script");
+
 
     // Convert the output to a String
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -81,6 +75,7 @@ fn end_to_end_test_authentication() {
         }
         assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output {}\n", stdout, stderr, server_msg);
     }
+    
 
     // Kill the server
     let _ = child.kill().expect("Failed to kill the ratchet application");

@@ -1,13 +1,59 @@
 [package]
 name = "ratchet"
 version = "0.1.0"
+description = "A pure Rust-language implementation of the TACACS+ protocol."
 edition = "2021"
+repository = "https://github.com/meltyness/ratchet"
+readme = "README.md"
+license = "MIT"
+keywords = ["tacacs", "security", "identity"]
+categories = ["Network programming"]
+
+[profile.release]
+incremental = true
+
+[profile.dev]
+incremental = true
 
 [dependencies]
 md5 = "0.7.0"
+precis-profiles = "0.1.11"
 
 [lints.rust]
-renamed_and_removed_lints = { level = "allow", priority = 0 }
-dead_code = "allow"
-unused_variables = "allow"
 non_camel_case_types = "allow"
+unused_variables = "allow"
+dead_code = "allow"
+non_snake_case = "allow"
+
+# a-ha! https://blog.rust-lang.org/2023/11/16/Rust-1.74.0.html#lint-configuration-through-cargo
+[lints.clippy]
+# Maintainability
+cargo = { level = "warn", priority = -1 }
+
+# Panics / Crashes
+arithmetic_side_effects = "allow"
+#fallible_impl_from = "warn"
+#get_unwrap = "warn"
+#index_refutable_slice = "warn"
+#inline_always = "warn"
+#manual_assert = "warn"
+#match_on_vec_items = "warn"
+#match_wild_err_arm = "warn"
+#missing_assert_message = "warn"
+#should_panic_without_expect = "warn"
+###unchecked_duration_subtraction = "warn"
+missing_panics_doc = "warn"
+cast_possible_truncation = "warn"
+indexing_slicing = "warn"
+panic_in_result_fn = "warn"
+string_slice = "warn"
+panic = "warn"
+expect_used = "warn"
+unreachable = "warn"
+unimplemented = "warn"
+unwrap_in_result = "warn"
+unwrap_used = "warn"
+
+
+
+
