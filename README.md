@@ -20,6 +20,14 @@ This server implements a slim portion of the TACACS+ protocol.
 ## Future plans
 - [ ] Updateable configuration
 - [ ] Configurable user list
+- [ ] Configurable clients list
 - [ ] Logging
 - [ ] Configurable port
-- [ ] Multi-threaded implementation
+
+Later
+- [ ] beautiful front-end
+- [ ] Benchmarks / Multi-threaded implementation
+- [ ] Rest of the protocol / MSCHAPv2
+- [ ] Support for complete set of security controls
+  - [ ] ... and automated auditing
+  - [ ] ... and 8907 future recs 
