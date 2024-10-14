@@ -256,6 +256,11 @@ pub fn main() {
     }
 }
 
+/// For a user-specified shell command string,
+/// expect a CSV list of clients.
+/// 
+/// Install the CSV list of clients as the users database.
+/// 
 fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i18n: bool) {
     // Otherwise use rt_server_read_creds to obtain credentials
     let output = Command::new("sh")
@@ -264,7 +269,6 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
     .output()
     .expect("Failed to execute configured command.");
 
-
     let data_str = String::from_utf8_lossy(&output.stdout);
 
     // Split by newline
@@ -272,9 +276,10 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
         // Split each line by comma
         let parts: Vec<&str> = line.split(',').collect();
         let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
+
         // Ensure there are exactly two parts to form a key-value pair
         if parts.len() == 2 {
-            let key = parts[0].trim().to_string(); // key takes ownership
+            let key = parts[0].trim().to_string();
 
             let username = if server_i18n {
                 match username_case_preserved.prepare(key) {
@@ -292,8 +297,8 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
             };
             
             println!("Ratchet Debug: Installed user {}", username);
-            let value = parts[1].trim().to_string(); // value takes ownership
-            creds_out.insert(username, value); // Insert key-value pair
+            let value = parts[1].to_string();
+            creds_out.insert(username, value);
         }
     }
 }
