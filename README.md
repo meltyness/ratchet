@@ -19,7 +19,7 @@ This server implements a slim portion of the TACACS+ protocol.
 
 ## Future plans
 - [ ] Updateable configuration
-- [ ] Configurable user list
+- [x] Configurable user list
 - [ ] Configurable clients list
 - [ ] Logging
 - [ ] Configurable port
