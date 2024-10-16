@@ -104,7 +104,7 @@ impl RTHeader {
             return Err("Client wants to send unreasonably large password or something");
         }
 
-        println!("Ratchet Debug: Parsed header: {:#?}", ret);
+        //println!("Ratchet Debug: Parsed header: {:#?}", ret);
         Ok(ret)
     }
 
@@ -121,14 +121,14 @@ impl RTHeader {
             return Err("Segment too short, check client implementation.");
         }
         
-        println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
+        //println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
 
         let pck_buf = md5_xor(&pck_buf, &md5pad);
         
         let ret = match RTAuthenStartPacket::from_raw_packet(&pck_buf){
             Ok(r) => r,
             Err(e) => {
-                println!("Ratchet Error: Invalid packet field processed {}", e);
+                //println!("Ratchet Error: Invalid packet field processed {}", e);
                 return Err("Packet field error in authentication.");
             }
         };
@@ -282,7 +282,7 @@ const RT_AUTH_TEXT_START: usize = RT_AUTHENTICATION_START_PACKET_INDEXES.data_le
 impl RTAuthenStartPacket {
     #[allow(clippy::indexing_slicing)]
     pub fn from_raw_packet(pck_buf : &[u8]) -> Result<Self, &str> {
-        println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
+        //println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
 
         // it seems risky to have the protocol do this unchecked.
         if pck_buf.len() < 8 {
@@ -295,7 +295,7 @@ impl RTAuthenStartPacket {
                                     (pck_buf[RT_AUTHENTICATION_START_PACKET_INDEXES.data_len] as usize) + 8;
         let expected_size = pck_buf.len();
         if purported_size != expected_size {
-            println!("Malformed packet size! {} {}", purported_size, expected_size);
+            //println!("Malformed packet size! {} {}", purported_size, expected_size);
             return Err("Malformed packet size (doesn't add up)");
         }
 
