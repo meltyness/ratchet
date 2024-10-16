@@ -20,11 +20,12 @@ This server implements a slim portion of the TACACS+ protocol.
 It's very fast and lightweight, with compiler optimization enabled, on a low-end system in a basic configuration, it's potentially capable of servicing as many as 32,000 requests / sec -- even single-threaded.
 
 ## Future plans
-- [ ] Updateable configuration
-- [x] Configurable user list
-- [ ] Configurable clients list
+- [ ] Configuration
+  - [x] Configurable user list
+  - [ ] Configurable clients list
+  - [ ] Configurable port
 - [ ] Logging
-- [ ] Configurable port
+
 
 Later
 - [ ] beautiful front-end
@@ -35,3 +36,4 @@ Later
   - [ ] ... and 8907 future recs
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
 - [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
+- [ ] CRUD config changes (currently will necessitate brief server relaunch)
