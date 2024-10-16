@@ -32,3 +32,4 @@ Later
   - [ ] ... and automated auditing
   - [ ] ... and 8907 future recs
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
+- [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
