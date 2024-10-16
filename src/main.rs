@@ -7,11 +7,13 @@
 //
 
 use std::env;
+use std::process::exit;
 use std::process::Command;
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::io::Write;
+use std::time::Duration;
 use std::time::Instant;
 
 use precis_profiles::precis_core::profile::Profile;
@@ -43,6 +45,9 @@ impl<'a> RTServerSettings<'a> {
 struct RTKnownClient {
 
 }
+
+static mut runs: f64 = 0.0;
+static mut running_avg: f64 = 0.0;
 
 /// # Panics
 /// 
@@ -103,15 +108,25 @@ pub fn main() {
 
     //println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
+
+    unsafe {
+        ctrlc::set_handler(move || {
+            println!("Ratchet Debug: Average processing time over {} runs: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
+            exit(0);
+        })
+        .expect("Error setting Ctrl-C handler");
+    }
+
     for stream in listener.incoming() {
         let start_time = Instant::now();
+        unsafe { runs = runs + 1.0;}
 
         // Stage 0: Check that this is a valid stream, produce some logs about the event.
         let mut stream = match stream {
             Ok(s) => { // TODO: Collect this into session info so that the following diagnostic logs can be associated
                 //println!("Ratchet Info: Received connection request from {}", s.peer_addr()
-                                                                               //.map_or("Unknown Address"
-                                                                               //.to_string(), |addr| addr.to_string())); 
+                                                                               //.map_or("Unknown Address".to_string(),
+                                                                               //|addr| addr.to_string())); 
                                                                                 // it *doesn't* take two to tango?
                 //println!("Ratchet Debug: Other connection info: Read Timeout: {:#?}, Write Timeout: {:#?}", s.read_timeout(),s.write_timeout());
                 match s.set_nodelay(true) {
@@ -260,8 +275,7 @@ pub fn main() {
             },
         }
         let end_time = Instant::now();
-
-        println!("Ratchet Info: Finished Processing! Took {:#?}", end_time - start_time);
+        unsafe {running_avg = running_avg + ((end_time - start_time)).as_secs_f64();}
     }
 }
 
@@ -310,6 +324,14 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
             creds_out.insert(username, value);
         }
     }
+}
+
+unsafe fn rt_get_avg() -> f64{
+    return running_avg;
+}
+
+unsafe fn rt_get_runs() -> f64 {
+    return runs;
 }
 
 fn rt_send_error_packet(msg: &[u8], stream: &mut TcpStream) {

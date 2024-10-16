@@ -15,11 +15,11 @@ while(1) {
 my $tac = new Authen::TacacsPlus(Host=>"127.0.0.1",
 			      Key=>"testing123",
 			      Port=>'44449',
-			      Timeout=>15);
+			      Timeout=>0);
 
 
 if ($tac->authen($username_to_use, $password_to_use, 2)) {
-	print "Success!\n" if rand(100) > 99;
+	print "Success!\n" if rand(1000) > 995;
 	$tac->close();
 	#exit;
 } else {

@@ -23,6 +23,7 @@ incremental = true
 [dependencies]
 md5 = "0.7.0"
 precis-profiles = "0.1.11"
+ctrlc = "3.4.5"
 
 [lints.rust]
 non_camel_case_types = "allow"

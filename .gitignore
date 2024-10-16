@@ -1,3 +1,6 @@
 /target
 *.swp
 user_list.txt
+flamegraph.svg
+perf.data
+perf.data.old
