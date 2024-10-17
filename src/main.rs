@@ -6,6 +6,8 @@
 // (C) 2024 - T.J. Hampton
 //
 
+use libc::{mlockall, madvise, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT, MADV_WILLNEED};
+
 use std::env;
 use std::process::exit;
 use std::process::Command;
@@ -46,14 +48,26 @@ struct RTKnownClient {
 
 }
 
+fn prefetch_memory_region(start_addr: *const u8, length: usize) {
+    let result = unsafe { madvise(start_addr as *mut _, length, MADV_WILLNEED) };
+
+    if result != 0 {
+        eprintln!("madvise failed");
+    } else {
+        println!("Memory region prefetched successfully");
+    }
+}
+
 static mut runs: f64 = 0.0;
 static mut running_avg: f64 = 0.0;
+static mut first_run: Option<Instant> = None;
 
 /// # Panics
 /// 
 /// Panics if the server cannot open on the specified hostaddr
 /// 
 pub fn main() {
+
     let mut server_settings = RTServerSettings::new(65535, 
                                                                     true,
                                                                     "cat /dev/null",
@@ -112,14 +126,29 @@ pub fn main() {
     unsafe {
         ctrlc::set_handler(move || {
             println!("Ratchet Debug: Average processing time over {} runs: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
+            println!("Ratchet Debug: total rate: {} runs / sec", runs / (Instant::now() - first_run.unwrap()).as_secs_f64());
             exit(0);
         })
         .expect("Error setting Ctrl-C handler");
     }
 
+    let result = unsafe { mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) };
+    if result != 0 {
+        eprintln!("mlockall failed with error code: {}", result);
+    } else {
+        println!("mlockall succeeded");
+    }
+
     for stream in listener.incoming() {
         let start_time = Instant::now();
-        unsafe { runs = runs + 1.0;}
+        unsafe { runs = runs + 1.0;
+            match first_run {
+                Some(_) => (),
+                None => {
+                    first_run = Some(start_time.clone())
+                },
+            }
+        }
 
         // Stage 0: Check that this is a valid stream, produce some logs about the event.
         let mut stream = match stream {

@@ -19,7 +19,7 @@ my $tac = new Authen::TacacsPlus(Host=>"127.0.0.1",
 
 
 if ($tac->authen($username_to_use, $password_to_use, 2)) {
-	print "Success!\n" if rand(1000) > 995;
+	print "Success!\n" if rand(1000) > 900;
 	$tac->close();
 	#exit;
 } else {
