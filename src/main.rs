@@ -58,9 +58,9 @@ fn prefetch_memory_region(start_addr: *const u8, length: usize) {
     }
 }
 
-static mut runs: f64 = 0.0;
-static mut running_avg: f64 = 0.0;
-static mut first_run: Option<Instant> = None;
+static mut RUNS: f64 = 0.0;
+static mut RUNNING_AVG: f64 = 0.0;
+static mut FIRST_RUN: Option<Instant> = None;
 
 /// # Panics
 /// 
@@ -125,8 +125,8 @@ pub fn main() {
 
     unsafe {
         ctrlc::set_handler(move || {
-            println!("Ratchet Debug: Average processing time over {} runs: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
-            println!("Ratchet Debug: total rate: {} runs / sec", runs / (Instant::now() - first_run.unwrap()).as_secs_f64());
+            println!("Ratchet Debug: Average processing time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
+            println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
             exit(0);
         })
         .expect("Error setting Ctrl-C handler");
@@ -141,11 +141,11 @@ pub fn main() {
 
     for stream in listener.incoming() {
         let start_time = Instant::now();
-        unsafe { runs = runs + 1.0;
-            match first_run {
+        unsafe { RUNS = RUNS + 1.0;
+            match FIRST_RUN {
                 Some(_) => (),
                 None => {
-                    first_run = Some(start_time.clone())
+                    FIRST_RUN = Some(start_time.clone())
                 },
             }
         }
@@ -304,7 +304,7 @@ pub fn main() {
             },
         }
         let end_time = Instant::now();
-        unsafe {running_avg = running_avg + ((end_time - start_time)).as_secs_f64();}
+        unsafe {RUNNING_AVG = RUNNING_AVG + ((end_time - start_time)).as_secs_f64();}
     }
 }
 
@@ -356,11 +356,11 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
 }
 
 unsafe fn rt_get_avg() -> f64{
-    return running_avg;
+    return RUNNING_AVG;
 }
 
 unsafe fn rt_get_runs() -> f64 {
-    return runs;
+    return RUNS;
 }
 
 fn rt_send_error_packet(msg: &[u8], stream: &mut TcpStream) {
