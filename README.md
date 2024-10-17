@@ -37,3 +37,14 @@ Later
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
 - [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
+
+## Kernel Hacking / Optimization
+I discovered that when using `perf` to profile `ratchet` that the pipeline was 30% faster, which was,... odd.
+
+After some intense digging, I still don't know for sure, however I did discover that:
+`echo "50" | sudo tee /proc/sys/net/core/busy_poll`
+`echo "50" | sudo tee /proc/sys/net/core/busy_read`
+
+(corresponding to a pretty aggressive polling cycle) yielded *approximately* the same benefit.
+
+😵
