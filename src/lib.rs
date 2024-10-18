@@ -428,6 +428,19 @@ pub struct RTAuthenReplyPacket {
     data : Vec<u8>,
 }
 
+#[derive(Debug)]
+#[repr(u8)]
+pub enum RTAuthenReplyStatus {
+    TAC_PLUS_AUTHEN_STATUS_PASS = 0x01,
+    TAC_PLUS_AUTHEN_STATUS_FAIL = 0x02,
+    TAC_PLUS_AUTHEN_STATUS_GETDATA = 0x03,
+    TAC_PLUS_AUTHEN_STATUS_GETUSER = 0x04,
+    TAC_PLUS_AUTHEN_STATUS_GETPASS = 0x05,
+    TAC_PLUS_AUTHEN_STATUS_RESTART = 0x06,
+    TAC_PLUS_AUTHEN_STATUS_ERROR = 0x07,
+    TAC_PLUS_AUTHEN_STATUS_FOLLOW = 0x21,
+}
+
 impl RTAuthenReplyPacket {
     pub fn get_success_packet() -> Self {
         Self {
@@ -477,6 +490,34 @@ impl RTAuthenReplyPacket {
 
         // Serialize the variable-size fields
         result.extend(&self.server_msg);
+        result.extend(&self.data);
+
+        result
+    }
+}
+
+// Ok so this one's easy:
+
+// This is a standard ASCII authentication. The START packet MAY contain the username. If the user does not include the username, then the server MUST obtain it from the client with a CONTINUE TAC_PLUS_AUTHEN_STATUS_GETUSER. If the user does not provide a username, then the server can send another TAC_PLUS_AUTHEN_STATUS_GETUSER request, but the server MUST limit the number of retries that are permitted; the recommended limit is three attempts. When the server has the username, it will obtain the password using a continue with TAC_PLUS_AUTHEN_STATUS_GETPASS. ASCII login uses the user_msg field for both the username and password. The data fields in both the START and CONTINUE packets are not used for ASCII logins; any content MUST be ignored. The session is composed of a single START followed by zero or more pairs of REPLYs and CONTINUEs, followed by a final REPLY indicating PASS, FAIL, or ERROR.
+
+#[derive(Debug)]
+pub struct RTAuthenContinuePacket {
+    user_msg_len : u16,
+    data_len : u16,
+    flags : u8,
+    user_msg : Vec<u8>,
+    data : Vec<u8>,
+}
+
+impl RTAuthenContinuePacket {
+    /// This prepares to stream a response
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+
+        // Serialize the fixed-size fields
+        result.extend(self.user_msg_len.to_be_bytes());
+        result.extend(self.data_len.to_be_bytes());
+        result.extend(&self.user_msg);
         result.extend(&self.data);
 
         result
