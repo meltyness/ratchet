@@ -384,7 +384,8 @@ pub enum RTAuthenPacketType {
     TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 = 0x06,
 }
 impl_from_byte!(RTAuthenPacketType,
-    TAC_PLUS_AUTHEN_TYPE_PAP);
+    TAC_PLUS_AUTHEN_TYPE_PAP,
+    TAC_PLUS_AUTHEN_TYPE_ASCII);
 
 #[derive(Debug)]
 #[repr(u8)]
