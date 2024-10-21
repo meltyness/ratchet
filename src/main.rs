@@ -386,9 +386,21 @@ pub fn main() {
                                 }
                             }
                         },
-                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_CHAP => todo!(),
-                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAP => todo!(),
-                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 => todo!(),
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_CHAP => {
+                            println!("Unknown Packet Format");
+                            authen_sess.send_error_packet( &mut stream);
+                            continue;
+                        },
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAP => {
+                            println!("Unknown Packet Format");
+                            authen_sess.send_error_packet( &mut stream);
+                            continue;
+                        },
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 => {
+                            println!("Unknown Packet Format");
+                            authen_sess.send_error_packet( &mut stream);
+                            continue;
+                        },
                     }
                 },
                 RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { 
