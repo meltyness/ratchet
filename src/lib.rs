@@ -62,6 +62,8 @@ impl RTHeader {
         result.extend(&self.tacp_hdr_sesid.to_be_bytes());
         result.extend(&self.tacp_hdr_length.to_be_bytes());
 
+        println!("Ratchet Debug: Serialized header to {:#?}", result);
+
         result
     }
 
@@ -71,13 +73,28 @@ impl RTHeader {
     /// TOOD: Do we want to abstract the session beyond the behaviors specified
     /// in the main loop? why?
     /// 
-    pub fn get_resp_header(ses : u32, r : &RTAuthenReplyPacket) -> Self {
+    pub fn get_resp_header(ses : u32, r : &RTAuthenReplyPacket, cur_seq: u8) -> Self {
         #[allow(clippy::cast_possible_truncation)]
         let lt = r.serialize().len() as u32;
+        let seq_no = cur_seq + 1;
         Self {
             tacp_hdr_version: RTTACVersion::TAC_PLUS_MINOR_VER_ONE,
             tacp_hdr_type: RTTACType::TAC_PLUS_AUTHEN,
-            tacp_hdr_seqno: 2,
+            tacp_hdr_seqno: seq_no,
+            tacp_hdr_flags: 0,
+            tacp_hdr_sesid: ses,
+            tacp_hdr_length: lt,
+        }
+    }
+
+    pub fn get_v0_header(ses : u32, r : &RTAuthenReplyPacket, cur_seq: u8) -> Self {
+        #[allow(clippy::cast_possible_truncation)]
+        let lt = r.serialize().len() as u32;
+        let seq_no = cur_seq + 1;
+        Self {
+            tacp_hdr_version: RTTACVersion::TAC_PLUS_MINOR_VER_DEFAULT,
+            tacp_hdr_type: RTTACType::TAC_PLUS_AUTHEN,
+            tacp_hdr_seqno: seq_no,
             tacp_hdr_flags: 0,
             tacp_hdr_sesid: ses,
             tacp_hdr_length: lt,
@@ -94,16 +111,23 @@ impl RTHeader {
     /// This prevents ratchet from proecssing very large
     /// messages, as required by RFC8907
     /// 
-    pub fn parse_init_header(stream: &mut TcpStream) -> Result<Self, &str> {
+    pub fn parse_init_header(stream: &mut TcpStream, cur_seq: u8) -> Result<Self, &str> {
         let mut hdr_buf: [u8; TACP_HEADER_MAX_LENGTH] = [0u8; TACP_HEADER_MAX_LENGTH];
-        
+        println!("Ratchet Debug: Reading {} off the line", cur_seq);
+        let exp_seq = cur_seq + 1;
         // TODO: this blocks.
-        if stream.read_exact(&mut hdr_buf).is_err() { return Err("Segment too short, check client implementation.") }
+        match stream.read_exact(&mut hdr_buf) {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Ratchet Error: TCP Error from subsystem: {}", e);
+                return Err("Segment too short, check client implementation.");
+            },
+        }
         
         let ret = Self {
             tacp_hdr_version: RTTACVersion::from_byte(hdr_buf[0])?,
             tacp_hdr_type:    RTTACType::from_byte(hdr_buf[1])?,
-            tacp_hdr_seqno:   match hdr_buf[2] { 1u8 => Ok(1), _ => Err("Invalid initial sequence number")}?,
+            tacp_hdr_seqno:   match hdr_buf[2] { exp_seq => Ok(exp_seq), _ => Err("Invalid initial sequence number")}?,
             tacp_hdr_flags:   match hdr_buf[3] { TAC_PLUS_NULL_FLAG => Ok(0), _ => Err("Single-session Mode Not Implemented, must be encrypted.")}?,
             tacp_hdr_sesid:   read_be_u32(&mut &hdr_buf[4..8]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,  
             tacp_hdr_length:  read_be_u32(&mut &hdr_buf[8..12]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,
@@ -113,7 +137,7 @@ impl RTHeader {
             return Err("Client wants to send unreasonably large password or something");
         }
 
-        //println!("Ratchet Debug: Parsed header: {:#?}", ret);
+        println!("Ratchet Debug: Parsed header: {:#?}", ret);
         Ok(ret)
     }
 
@@ -127,23 +151,33 @@ impl RTHeader {
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
 
         // TODO: this blocks
-        if stream.read_exact(&mut pck_buf).is_err() { 
-            return Err("Segment too short, check client implementation.");
+        match stream.read_exact(&mut pck_buf) {
+            Ok(_) => (),
+            Err(e) => {
+                println!("Ratchet Error: TCP Error from subsystem: {}", e);
+                return Err("Segment too short, check client implementation.");
+            },
         }
         
         //println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
 
         let pck_buf = md5_xor(&pck_buf, &md5pad);
         
-        let ret = match RTAuthenStartPacket::from_raw_packet(&pck_buf){
-            Ok(r) => r,
+        match RTAuthenStartPacket::from_raw_packet(&pck_buf){
+            Ok(r) => 
+                Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenStartPacket(r))),
             Err(e) => {
-                //println!("Ratchet Error: Invalid packet field processed {}", e);
-                return Err("Packet field error in authentication.");
+                println!("Ratchet Debug: Packet was not Start packet, trying Continue packet");
+                match RTAuthenContinuePacket::from_raw_packet(&pck_buf) {
+                    Ok(r) =>
+                        Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenContinuePacket(r))),
+                    Err(e) => {
+                        println!("Ratchet Error: Invalid packet field processed {}", e);
+                        return Err("Packet field error in authentication.");
+                    }
+                }                
             }
-        };
-        
-        Ok(RTDecodedPacket::RTAuthenPacket(RTAuthenPacket::RTAuthenStartPacket(ret)))
+        }
     }
 
     /// Generate the pad and truncate it to length
@@ -192,6 +226,10 @@ impl_from_byte!(RTTACVersion,
     TAC_PLUS_MINOR_VER_DEFAULT,
     TAC_PLUS_MINOR_VER_ONE);
 
+impl_global_consts!(RTTACVersion, 
+    TAC_PLUS_MINOR_VER_DEFAULT,
+    TAC_PLUS_MINOR_VER_ONE);    
+
 #[derive(Debug, Clone)]
 #[repr(u8)]
 pub enum RTTACType {
@@ -223,6 +261,7 @@ pub enum RTDecodedPacket {
 pub enum RTAuthenPacket {
     RTAuthenStartPacket(RTAuthenStartPacket),
     RTAuthenReplyPacket(RTAuthenReplyPacket),
+    RTAuthenContinuePacket(RTAuthenContinuePacket),
 }
 
 pub struct RTAuthenStartPacketIndexes {
@@ -251,7 +290,7 @@ const RT_AUTHENTICATION_START_PACKET_INDEXES: RTAuthenStartPacketIndexes = RTAut
 pub struct RTAuthenStartPacket {
     action : RTAuthenPacketAction,
     priv_lvl : u8,
-    authen_type : RTAuthenPacketType,
+    pub authen_type : RTAuthenPacketType,
     authen_service : RTAuthenPacketService,
     user_len : u8,
     port_len : u8,
@@ -465,14 +504,27 @@ impl_global_consts!(RTAuthenReplyStatus,
     TAC_PLUS_AUTHEN_STATUS_FOLLOW
 );
 
+const TAC_PLUS_REPLY_FLAG_NOECHO: u8 = 0x01;
+
 impl RTAuthenReplyPacket {
+    pub fn get_getuser_packet() -> Self {
+        Self {
+            status: TAC_PLUS_AUTHEN_STATUS_GETUSER,
+            flags: 0,
+            server_msg_len: 27,
+            data_len: 0,
+            server_msg: "Type your ratchet username:".into(),
+            data: vec![],
+        }
+    }
+
     pub fn get_getpass_packet() -> Self {
         Self {
             status: TAC_PLUS_AUTHEN_STATUS_GETPASS,
-            flags: 0,
-            server_msg_len: 0,
+            flags: TAC_PLUS_REPLY_FLAG_NOECHO,
+            server_msg_len: 27,
             data_len: 0,
-            server_msg: vec![],
+            server_msg: "Type your ratchet password:".into(),
             data: vec![],
         }
     }
@@ -538,22 +590,71 @@ pub struct RTAuthenContinuePacket {
     user_msg_len : u16,
     data_len : u16,
     flags : u8,
-    user_msg : Vec<u8>,
+    pub user_msg : Vec<u8>,
     data : Vec<u8>,
 }
 
+pub struct RTAuthenContPacketIndexes {
+    user_msg_len: usize,
+    data_len: usize,
+    flags: usize,
+}
+
+const RT_AUTHENTICATION_CONT_PACKET_INDEXES: RTAuthenContPacketIndexes = RTAuthenContPacketIndexes {
+    user_msg_len: 0,
+    data_len: 2,
+    flags: 4,
+};
+
+const RT_CONT_TEXT_START: usize = RT_AUTHENTICATION_CONT_PACKET_INDEXES.flags + 1;
+
 impl RTAuthenContinuePacket {
-    /// This prepares to stream a response
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut result = Vec::new();
+    pub fn from_raw_packet(pck_buf : &[u8]) -> Result<Self, &str> {
+        println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
 
-        // Serialize the fixed-size fields
-        result.extend(self.user_msg_len.to_be_bytes());
-        result.extend(self.data_len.to_be_bytes());
-        result.extend(&self.user_msg);
-        result.extend(&self.data);
+        // it seems risky to have the protocol do this unchecked.
+        if pck_buf.len() < 5 {
+            return Err("Malformed authentication packet (too short)");
+        }
+        let purported_user_msg_len = read_be_u16(&mut &pck_buf[RT_AUTHENTICATION_CONT_PACKET_INDEXES.user_msg_len..RT_AUTHENTICATION_CONT_PACKET_INDEXES.user_msg_len+2])
+            .map_or(Err("read_be_u16 can only process 2-slices"), Ok)?;
+        let purported_data_len = read_be_u16(&mut &pck_buf[RT_AUTHENTICATION_CONT_PACKET_INDEXES.data_len..RT_AUTHENTICATION_CONT_PACKET_INDEXES.data_len+2])
+            .map_or(Err("read_be_u16 can only process 2-slices"), Ok)?;
 
-        result
+        let purported_size = (purported_user_msg_len as usize) +
+                                    (purported_data_len as usize) + 5;
+        let expected_size = pck_buf.len();
+
+        if purported_size != expected_size {
+            println!("Malformed packet size! {} {}", purported_size, expected_size);
+            return Err("Malformed packet size (doesn't add up)");
+        }
+
+        // assert!(false, "The code needs to verify that the text portions (user, port, rem_addr, and pck_buf) are printables");
+
+        let ret = Self {
+            user_msg_len: purported_user_msg_len,
+            data_len: purported_data_len,
+            flags: pck_buf[RT_AUTHENTICATION_CONT_PACKET_INDEXES.flags],
+            user_msg: pck_buf[RT_CONT_TEXT_START..
+
+                        RT_CONT_TEXT_START + 
+                        (purported_user_msg_len as usize)].to_vec(),
+
+            data: pck_buf[RT_CONT_TEXT_START + 
+                        (purported_user_msg_len as usize)..].to_vec(),
+        };
+
+        // Not sure how I feel about doing this after instantiating but, it's a nitpick I think.
+        if ret.user_msg.iter().map(|c| c.is_ascii_control()).reduce(|c_1, cs| c_1 || cs).unwrap_or(false) {
+            return Err("Non-printable characters in TACACS Authen Continue user_msg");
+        }        
+        
+        if ret.data.iter().map(|c| c.is_ascii_control()).reduce(|c_1, cs| c_1 || cs).unwrap_or(false) {
+            return Err("Non-printable characters in TACACS Authen Continue data");
+        }
+
+        Ok(ret)
     }
 }
 
@@ -605,4 +706,22 @@ fn read_be_u32<'a>(input: &'a mut &'a [u8]) -> Result<u32, &'a str> {
     *input = rest;
     #[allow(clippy::unwrap_used)]
     Ok(u32::from_be_bytes(int_bytes.try_into().unwrap()))
+}
+
+/// This is from an example provided in the Rust std docs.
+/// 
+/// ⚡ The length of any slice passed must be 2.
+/// 
+/// ```
+/// assert_eq!(2, std::mem::size_of::<u16>());
+/// ```
+/// 
+fn read_be_u16<'a>(input: &'a mut &'a [u8]) -> Result<u16, &'a str> {
+    if input.len() < 2 { 
+        return Err("read_be_u32 can only process 4-slices"); 
+    }
+    let (int_bytes, rest) = input.split_at(2);
+    *input = rest;
+    #[allow(clippy::unwrap_used)]
+    Ok(u16::from_be_bytes(int_bytes.try_into().unwrap()))
 }

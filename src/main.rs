@@ -8,6 +8,7 @@
 
 use libc::{mlockall, madvise, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT, MADV_WILLNEED};
 
+
 use std::env;
 use std::process::exit;
 use std::process::Command;
@@ -27,6 +28,7 @@ use ratchet::RTAuthenPacket;
 use ratchet::md5_xor;
 use ratchet::RTDecodedPacket;
 use ratchet::RTAuthenReplyPacket;
+use ratchet::RTAuthenContinuePacket;
 
 const SECRET_KEY: &str = "testing123"; // TODO: When building a red-black tree of clients, 
                                     //ensure that they are required to have a secret, or not clients.
@@ -191,9 +193,9 @@ pub fn main() {
         };
 
         // Stage 1: Parse header, establish session
-        let hdr: RTHeader = match RTHeader::parse_init_header(&mut stream) { 
+        let hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, 0) { 
             Ok(h) => {
-                //println!("Ratchet Debug: Processed {:#?}", h); 
+                println!("Ratchet Debug: Processed {:#?}", h); 
                 h
             },
             Err(e) => {
@@ -225,7 +227,7 @@ pub fn main() {
                 continue; 
             }
             Ok(d) => {
-                //println!("Ratchet Debug: Processed {:#?}", d); 
+                println!("Ratchet Debug: Processed {:#?}", d); 
                 d
             },
         };
@@ -234,83 +236,359 @@ pub fn main() {
         match decoded {
             RTDecodedPacket::RTAuthenPacket(ap) => match ap {
                 RTAuthenPacket::RTAuthenStartPacket(asp) => {
-                    println!("Ratchet Info: Decoded: {}", asp);
-                    let raw_username = String::from_utf8_lossy(&asp.user);
-                    let auth_request_password = String::from_utf8_lossy(&asp.data);
-                    let mut user_authenticated = false;
+                    match asp.authen_type {
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_ASCII => {
+                            // TODO: This can hang forever with a misbehaving client,
+                            //      ... the server must be multithreaded or implement read/write timeout.
+                            //      ... better to go multithreaded.
+                            let mut cur_seq = 1; // We received one.
+                            println!("Ratchet Info: Decoded: {}", asp);
+                            // (sort of) Authenticate the server before putting a cred on the line
+                            let mut retries = 0;
+                            let obtained_username;
+                            if asp.user.len() == 0 { // have to fetch username
+                                let get_user_packet = RTAuthenReplyPacket::get_getuser_packet();
 
-                    println!("Ratchet Debug: Looking up {}", raw_username);
+                                // TODO: Refactor this mantra into a neatly architected thingamajig
+                                //   ... maybe the 'outermost' detail needed is the session info (i.e., expected pack number, expected sesid), so
+                                //   ... it should be a part of a session implementation for the full transaction.
+                                let user_resp_hdr = RTHeader::get_v0_header(hdr.tacp_hdr_sesid, &get_user_packet, cur_seq);
+                                cur_seq += 1;
+                                println!("Ratchet Debug: {:#?}", user_resp_hdr);
+                                println!("Ratchet Debug: {:#?}", get_user_packet);
+                                let pad = user_resp_hdr.compute_md5_pad( SECRET_KEY );
+                                let mut payload = md5_xor(&get_user_packet.serialize(), &pad);
+                                let mut msg = user_resp_hdr.serialize();
+                                msg.append(&mut payload);
+        
+                                println!("{:?}", msg);
+                                // TODO: This blocks
+                                match stream.write(&msg) {
+                                    Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                                    Err(e) => 
+                                        println!("Ratchet Error: TCP Error, {}", e),
+                                    //},
+                                }
+    
+                                // TODO: Ok... session loop is starting over...? Not really it's a sequence .... hmmmmmmmmm...
+                                let user_hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, cur_seq) { 
+                                    Ok(h) => {
+                                        //println!("Ratchet Debug: Processed {:#?}", h); 
+                                        cur_seq += 1;
+                                        h
+                                    },
+                                    Err(e) => {
+                                        println!("Ratchet Error: {}", e);
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue;
+                                    },
+                                };
+    
+                                let user_contents = match user_hdr.tacp_hdr_type {
+                                    RTTACType::TAC_PLUS_AUTHEN => user_hdr.parse_authen_packet(&mut stream, SECRET_KEY),
+                                    RTTACType::TAC_PLUS_AUTHOR => {
+                                        println!("Ratchet Debug: Not Implemented");
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue;
+                                    },
+                                    RTTACType::TAC_PLUS_ACCT => {
+                                        println!("Ratchet Debug: Not Implemented");
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue;
+                                    },
+                                };
+    
+                                let decoded_user: RTDecodedPacket = match user_contents {
+                                    Err(e) => { 
+                                        println!("Ratchet Error: {}", e); 
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue; 
+                                    }
+                                    Ok(d) => {
+                                        //println!("Ratchet Debug: Processed {:#?}", d); 
+                                        d
+                                    },
+                                };
 
-                    let username = if server_settings.rt_server_i18n {
-                        match username_case_preserved.prepare(raw_username) {
-                            Ok(fixed_username) => { 
-                                println!("Ratchet Debug: Looking up {}", fixed_username);
-                                fixed_username
+                                println!("Ratchet Debug: Deciding on decoded user packet");
+                                match decoded_user {
+                                    RTDecodedPacket::RTAuthenPacket(rtauthen_user_packet) => {
+                                        println!("Ratchet Debug: Was authen packet, checking for Continue");
+                                        match rtauthen_user_packet {
+                                            RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
+                                                obtained_username = rtauthen_continue_packet.user_msg;
+                                            },
+                                            _ => {
+                                                println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                                                rt_send_error_packet(&generic_error, &mut stream);
+                                                continue; 
+                                            },
+                                        }
+                                    },
+                                    _ => { 
+                                        println!("Ratchet Error: Non authen packet in Authen sequence");
+                                        println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue; 
+                                    },
+                                }
+                            } else {
+                                obtained_username = asp.user;
+                            }
+                            
+                            // TODO: Everybody gets one
+                            let get_password_packet = RTAuthenReplyPacket::get_getpass_packet();
+
+                            // TODO: Refactor this mantra into a neatly architected thingamajig
+                            //   ... maybe the 'outermost' detail needed is the session info (i.e., expected pack number, expected sesid), so
+                            //   ... it should be a part of a session implementation for the full transaction.
+                            println!("Ratchet Debug: {:#?}", get_password_packet);
+                            let getpass_resp_hdr = RTHeader::get_v0_header(hdr.tacp_hdr_sesid, &get_password_packet, cur_seq);
+                            println!("Ratchet Debug: {:#?}", getpass_resp_hdr);
+                            let pad = getpass_resp_hdr.compute_md5_pad( SECRET_KEY );
+                            let mut payload = md5_xor(&get_password_packet.serialize(), &pad);
+                            let mut msg = getpass_resp_hdr.serialize();
+                            msg.append(&mut payload);
+    
+                            println!("{:?}", msg);
+                            // TODO: This blocks
+                            match stream.write(&msg) {
+                                Ok(v) => { 
+                                    cur_seq += 1;
+                                    println!("Ratchet Debug: Sent {} bytes", v)
                             },
-                            Err(e) => {
-                                println!("Ratchet Error: Invalid username passed, {}", e);
-                                rt_send_error_packet(&generic_error, &mut stream);
-                                continue;
-                            },
-                        }
-                    } else {
-                        raw_username
-                    };
-                    
-                    if let Some(p) = credentials.get(&username.to_string()) {
-                        // User known, check authentication success.
-                        println!("Ratchet Debug: Found user with password: {}", p);
-                        println!("Attempting to compare {} to {}", p, auth_request_password);
-                        user_authenticated = p == &auth_request_password;
-                    } else {
-                        println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
-                        // user who? user not authenticated!
-                    }
+                                Err(e) => 
+                                    println!("Ratchet Error: TCP Error, {}", e),
+                                //},
+                            }
 
-                    if user_authenticated {
-                        let r = RTAuthenReplyPacket::get_success_packet();
-                        println!("Ratchet Debug: {username} Authenticated successfully, signalling client.");
-                        println!("Ratchet Debug: {:#?}", r);
-                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r);
-                        println!("Ratchet Debug: {:#?}", resp_hdr);
-                        let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
-                        let mut payload = md5_xor(&r.serialize(), &pad);
-                        let mut msg = resp_hdr.serialize();
-                        msg.append(&mut payload);
+                            // TODO: Ok... session loop is starting over...? Not really it's a sequence .... hmmmmmmmmm...
+                            let pass_hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, cur_seq) { 
+                                Ok(h) => {
+                                    //println!("Ratchet Debug: Processed {:#?}", h); 
+                                    cur_seq += 1;
+                                    h
+                                },
+                                Err(e) => {
+                                    println!("Ratchet Error: {}", e);
+                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    continue;
+                                },
+                            };
 
-                        println!("{:?}", msg);
-                        // TODO: This blocks
-                        match stream.write(&msg) {
-                            Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
-                            Err(e) => {
-                                println!("Ratchet Error: TCP Error, {}", e);
-                            },
-                        }
-                    } else {
-                        let r = RTAuthenReplyPacket::get_fail_packet();
-                        println!("Ratchet Debug: {username} Authentication failed, signalling client.");
-                        println!("Ratchet Debug: {:#?}", r);
-                        let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r);
-                        println!("Ratchet Debug: {:#?}", resp_hdr);
-                        let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
-                        let mut payload = md5_xor(&r.serialize(), &pad);
-                        let mut msg = resp_hdr.serialize();
-                        msg.append(&mut payload);
+                            let pass_contents = match pass_hdr.tacp_hdr_type {
+                                RTTACType::TAC_PLUS_AUTHEN => pass_hdr.parse_authen_packet(&mut stream, SECRET_KEY),
+                                RTTACType::TAC_PLUS_AUTHOR => {
+                                    println!("Ratchet Debug: Not Implemented");
+                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    continue;
+                                },
+                                RTTACType::TAC_PLUS_ACCT => {
+                                    println!("Ratchet Debug: Not Implemented");
+                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    continue;
+                                },
+                            };
 
-                        println!("{:?}", msg);
-                        // TODO: This blocks
-                        match stream.write(&msg) {
-                            Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
-                            Err(e) => 
-                                println!("Ratchet Error: TCP Error, {}", e),
-                            //},
-                        }
+                            let decoded_pass: RTDecodedPacket = match pass_contents {
+                                Err(e) => { 
+                                    println!("Ratchet Error: {}", e); 
+                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    continue; 
+                                }
+                                Ok(d) => {
+                                    //println!("Ratchet Debug: Processed {:#?}", d); 
+                                    d
+                                },
+                            };
+
+                            let obtained_password;
+                            match decoded_pass {
+                                RTDecodedPacket::RTAuthenPacket(rtauthen_pass_packet) => {
+                                    match rtauthen_pass_packet {
+                                        RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
+                                            obtained_password = rtauthen_continue_packet.user_msg;
+                                        },
+                                        _ => {
+                                            println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                                            rt_send_error_packet(&generic_error, &mut stream);
+                                            continue; 
+                                        },
+                                    }
+                                },
+                                _ => { 
+                                    println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    continue; 
+                                },
+                            }
+
+                            // TODO: BIG CODE DUPLICATION
+                            // TODO: BIG CODE DUPLICATION
+                            // TODO: BIG CODE DUPLICATION
+                            // TODO: BIG CODE DUPLICATION
+                            // TODO: BIG CODE DUPLICATION
+                            // TODO: BIG CODE DUPLICATION
+                            let raw_username = String::from_utf8_lossy(&obtained_username);
+                            let auth_request_password = String::from_utf8_lossy(&obtained_password);
+                            let mut user_authenticated = false;
+        
+                            println!("Ratchet Debug: Looking up {}", raw_username);
+        
+                            let username = if server_settings.rt_server_i18n {
+                                match username_case_preserved.prepare(raw_username) {
+                                    Ok(fixed_username) => { 
+                                        println!("Ratchet Debug: Looking up {}", fixed_username);
+                                        fixed_username
+                                    },
+                                    Err(e) => {
+                                        println!("Ratchet Error: Invalid username passed, {}", e);
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue;
+                                    },
+                                }
+                            } else {
+                                raw_username
+                            };
+                            
+                            if let Some(p) = credentials.get(&username.to_string()) {
+                                // User known, check authentication success.
+                                println!("Ratchet Debug: Found user with password: {}", p);
+                                println!("Attempting to compare {} to {}", p, auth_request_password);
+                                user_authenticated = p == &auth_request_password;
+                            } else {
+                                println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
+                                // user who? user not authenticated!
+                            }
+        
+                            if user_authenticated {
+                                let r = RTAuthenReplyPacket::get_success_packet();
+                                println!("Ratchet Debug: {username} Authenticated successfully, signalling client.");
+                                println!("Ratchet Debug: {:#?}", r);
+                                let resp_hdr = RTHeader::get_v0_header(hdr.tacp_hdr_sesid, &r, cur_seq);
+                                println!("Ratchet Debug: {:#?}", resp_hdr);
+                                let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                                let mut payload = md5_xor(&r.serialize(), &pad);
+                                let mut msg = resp_hdr.serialize();
+                                msg.append(&mut payload);
+        
+                                println!("{:?}", msg);
+                                // TODO: This blocks
+                                match stream.write(&msg) {
+                                    Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                                    Err(e) => {
+                                        println!("Ratchet Error: TCP Error, {}", e);
+                                    },
+                                }
+                            } else {
+                                let r = RTAuthenReplyPacket::get_fail_packet();
+                                println!("Ratchet Debug: {username} Authentication failed, signalling client.");
+                                println!("Ratchet Debug: {:#?}", r);
+                                let resp_hdr = RTHeader::get_v0_header(hdr.tacp_hdr_sesid, &r, cur_seq);
+                                println!("Ratchet Debug: {:#?}", resp_hdr);
+                                let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                                let mut payload = md5_xor(&r.serialize(), &pad);
+                                let mut msg = resp_hdr.serialize();
+                                msg.append(&mut payload);
+        
+                                println!("{:?}", msg);
+                                // TODO: This blocks
+                                match stream.write(&msg) {
+                                    Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                                    Err(e) => 
+                                        println!("Ratchet Error: TCP Error, {}", e),
+                                    //},
+                                }
+                            }
+                        },
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_PAP => {
+                            println!("Ratchet Info: Decoded: {}", asp);
+                            let raw_username = String::from_utf8_lossy(&asp.user);
+                            let auth_request_password = String::from_utf8_lossy(&asp.data);
+                            let mut user_authenticated = false;
+        
+                            println!("Ratchet Debug: Looking up {}", raw_username);
+        
+                            let username = if server_settings.rt_server_i18n {
+                                match username_case_preserved.prepare(raw_username) {
+                                    Ok(fixed_username) => { 
+                                        println!("Ratchet Debug: Looking up {}", fixed_username);
+                                        fixed_username
+                                    },
+                                    Err(e) => {
+                                        println!("Ratchet Error: Invalid username passed, {}", e);
+                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        continue;
+                                    },
+                                }
+                            } else {
+                                raw_username
+                            };
+                            
+                            if let Some(p) = credentials.get(&username.to_string()) {
+                                // User known, check authentication success.
+                                println!("Ratchet Debug: Found user with password: {}", p);
+                                println!("Attempting to compare {} to {}", p, auth_request_password);
+                                user_authenticated = p == &auth_request_password;
+                            } else {
+                                println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
+                                // user who? user not authenticated!
+                            }
+        
+                            if user_authenticated {
+                                let r = RTAuthenReplyPacket::get_success_packet();
+                                println!("Ratchet Debug: {username} Authenticated successfully, signalling client.");
+                                println!("Ratchet Debug: {:#?}", r);
+                                let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r, 1);
+                                println!("Ratchet Debug: {:#?}", resp_hdr);
+                                let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                                let mut payload = md5_xor(&r.serialize(), &pad);
+                                let mut msg = resp_hdr.serialize();
+                                msg.append(&mut payload);
+        
+                                println!("{:?}", msg);
+                                // TODO: This blocks
+                                match stream.write(&msg) {
+                                    Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                                    Err(e) => {
+                                        println!("Ratchet Error: TCP Error, {}", e);
+                                    },
+                                }
+                            } else {
+                                let r = RTAuthenReplyPacket::get_fail_packet();
+                                println!("Ratchet Debug: {username} Authentication failed, signalling client.");
+                                println!("Ratchet Debug: {:#?}", r);
+                                let resp_hdr = RTHeader::get_resp_header(hdr.tacp_hdr_sesid, &r, 1);
+                                println!("Ratchet Debug: {:#?}", resp_hdr);
+                                let pad = resp_hdr.compute_md5_pad( SECRET_KEY );
+                                let mut payload = md5_xor(&r.serialize(), &pad);
+                                let mut msg = resp_hdr.serialize();
+                                msg.append(&mut payload);
+        
+                                println!("{:?}", msg);
+                                // TODO: This blocks
+                                match stream.write(&msg) {
+                                    Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
+                                    Err(e) => 
+                                        println!("Ratchet Error: TCP Error, {}", e),
+                                    //},
+                                }
+                            }
+                        },
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_CHAP => todo!(),
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAP => todo!(),
+                        ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 => todo!(),
                     }
                 },
                 RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { 
                     println!("Ratchet Error: umm... no, I'M the server.");
                     rt_send_error_packet(&generic_error, &mut stream);
                     continue; 
+                },
+                RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
+                    println!("Ratchet Error: Unexpected continue packet!!");
+                    rt_send_error_packet(&generic_error, &mut stream);
+                    continue;
                 },
                 // _ => println!("Unknown Authen Packet Format"),
             }
