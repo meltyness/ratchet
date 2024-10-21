@@ -258,17 +258,14 @@ pub fn main() {
                             
                             // Stage 2: Fetch the Password
                             // TODO: Everybody gets one
-                            let obtained_password= if asp.user.len() == 0 { // have to fetch username
+                            let obtained_password=
                                 match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getpass_packet()) {
                                     Ok(u) => u,
                                     Err(_) => {
                                         authen_sess.send_error_packet(&mut stream);
                                         continue;
                                     },
-                                }
-                            } else {
-                                String::from_utf8_lossy(&asp.user).to_string()
-                            };
+                                };
                             
                             if obtained_password.len() == 0 || obtained_username.len() == 0 {
                                 // buzz off
