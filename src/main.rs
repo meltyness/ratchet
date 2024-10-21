@@ -22,6 +22,7 @@ use std::time::Instant;
 use precis_profiles::precis_core::profile::Profile;
 use precis_profiles::UsernameCasePreserved;
 
+use ratchet::RTAuthenSess;
 use ratchet::RTHeader;
 use ratchet::RTTACType;
 use ratchet::RTAuthenPacket;
@@ -128,7 +129,6 @@ pub fn main() {
         }
     }
 
-    let generic_error = RTAuthenReplyPacket::get_error_packet().serialize();
 
     println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
@@ -200,22 +200,24 @@ pub fn main() {
             },
             Err(e) => {
                 println!("Ratchet Error: {}", e);
-                rt_send_error_packet(&generic_error, &mut stream);
+                //authen_sess.send_error_packet( &mut stream);
                 continue;
             },
         };
+
+        let mut authen_sess = RTAuthenSess::from_header(&hdr, SECRET_KEY);
 
         // Stage 2: Parse packet, perform appropriate treatment
         let contents = match hdr.tacp_hdr_type {
             RTTACType::TAC_PLUS_AUTHEN => hdr.parse_authen_packet(&mut stream, SECRET_KEY),
             RTTACType::TAC_PLUS_AUTHOR => {
                 println!("Ratchet Debug: Not Implemented");
-                rt_send_error_packet(&generic_error, &mut stream);
+                authen_sess.send_error_packet( &mut stream);
                 continue;
             },
             RTTACType::TAC_PLUS_ACCT => {
                 println!("Ratchet Debug: Not Implemented");
-                rt_send_error_packet(&generic_error, &mut stream);
+                authen_sess.send_error_packet( &mut stream);
                 continue;
             },
         };
@@ -223,7 +225,7 @@ pub fn main() {
         let decoded: RTDecodedPacket = match contents {
             Err(e) => { 
                 println!("Ratchet Error: {}", e); 
-                rt_send_error_packet(&generic_error, &mut stream);
+                authen_sess.send_error_packet( &mut stream);
                 continue; 
             }
             Ok(d) => {
@@ -245,6 +247,8 @@ pub fn main() {
                             println!("Ratchet Info: Decoded: {}", asp);
                             // (sort of) Authenticate the server before putting a cred on the line
                             let mut retries = 0;
+
+                            // Stage 1: Fetch the Username
                             let obtained_username;
                             if asp.user.len() == 0 { // have to fetch username
                                 let get_user_packet = RTAuthenReplyPacket::get_getuser_packet();
@@ -279,7 +283,7 @@ pub fn main() {
                                     },
                                     Err(e) => {
                                         println!("Ratchet Error: {}", e);
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue;
                                     },
                                 };
@@ -288,12 +292,12 @@ pub fn main() {
                                     RTTACType::TAC_PLUS_AUTHEN => user_hdr.parse_authen_packet(&mut stream, SECRET_KEY),
                                     RTTACType::TAC_PLUS_AUTHOR => {
                                         println!("Ratchet Debug: Not Implemented");
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue;
                                     },
                                     RTTACType::TAC_PLUS_ACCT => {
                                         println!("Ratchet Debug: Not Implemented");
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue;
                                     },
                                 };
@@ -301,7 +305,7 @@ pub fn main() {
                                 let decoded_user: RTDecodedPacket = match user_contents {
                                     Err(e) => { 
                                         println!("Ratchet Error: {}", e); 
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue; 
                                     }
                                     Ok(d) => {
@@ -320,7 +324,7 @@ pub fn main() {
                                             },
                                             _ => {
                                                 println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
-                                                rt_send_error_packet(&generic_error, &mut stream);
+                                                authen_sess.send_error_packet( &mut stream);
                                                 continue; 
                                             },
                                         }
@@ -328,7 +332,7 @@ pub fn main() {
                                     _ => { 
                                         println!("Ratchet Error: Non authen packet in Authen sequence");
                                         println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue; 
                                     },
                                 }
@@ -336,7 +340,9 @@ pub fn main() {
                                 obtained_username = asp.user;
                             }
                             
+                            // Stage 2: Fetch the Password
                             // TODO: Everybody gets one
+                            
                             let get_password_packet = RTAuthenReplyPacket::get_getpass_packet();
 
                             // TODO: Refactor this mantra into a neatly architected thingamajig
@@ -371,7 +377,7 @@ pub fn main() {
                                 },
                                 Err(e) => {
                                     println!("Ratchet Error: {}", e);
-                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    authen_sess.send_error_packet( &mut stream);
                                     continue;
                                 },
                             };
@@ -380,12 +386,12 @@ pub fn main() {
                                 RTTACType::TAC_PLUS_AUTHEN => pass_hdr.parse_authen_packet(&mut stream, SECRET_KEY),
                                 RTTACType::TAC_PLUS_AUTHOR => {
                                     println!("Ratchet Debug: Not Implemented");
-                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    authen_sess.send_error_packet( &mut stream);
                                     continue;
                                 },
                                 RTTACType::TAC_PLUS_ACCT => {
                                     println!("Ratchet Debug: Not Implemented");
-                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    authen_sess.send_error_packet( &mut stream);
                                     continue;
                                 },
                             };
@@ -393,7 +399,7 @@ pub fn main() {
                             let decoded_pass: RTDecodedPacket = match pass_contents {
                                 Err(e) => { 
                                     println!("Ratchet Error: {}", e); 
-                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    authen_sess.send_error_packet( &mut stream);
                                     continue; 
                                 }
                                 Ok(d) => {
@@ -411,18 +417,19 @@ pub fn main() {
                                         },
                                         _ => {
                                             println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
-                                            rt_send_error_packet(&generic_error, &mut stream);
+                                            authen_sess.send_error_packet( &mut stream);
                                             continue; 
                                         },
                                     }
                                 },
                                 _ => { 
                                     println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
-                                    rt_send_error_packet(&generic_error, &mut stream);
+                                    authen_sess.send_error_packet( &mut stream);
                                     continue; 
                                 },
                             }
-
+                            
+                            
                             // TODO: BIG CODE DUPLICATION
                             // TODO: BIG CODE DUPLICATION
                             // TODO: BIG CODE DUPLICATION
@@ -443,7 +450,7 @@ pub fn main() {
                                     },
                                     Err(e) => {
                                         println!("Ratchet Error: Invalid username passed, {}", e);
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue;
                                     },
                                 }
@@ -517,7 +524,7 @@ pub fn main() {
                                     },
                                     Err(e) => {
                                         println!("Ratchet Error: Invalid username passed, {}", e);
-                                        rt_send_error_packet(&generic_error, &mut stream);
+                                        authen_sess.send_error_packet( &mut stream);
                                         continue;
                                     },
                                 }
@@ -582,19 +589,19 @@ pub fn main() {
                 },
                 RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { 
                     println!("Ratchet Error: umm... no, I'M the server.");
-                    rt_send_error_packet(&generic_error, &mut stream);
+                    authen_sess.send_error_packet( &mut stream);
                     continue; 
                 },
                 RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
                     println!("Ratchet Error: Unexpected continue packet!!");
-                    rt_send_error_packet(&generic_error, &mut stream);
+                    authen_sess.send_error_packet( &mut stream);
                     continue;
                 },
                 // _ => println!("Unknown Authen Packet Format"),
             }
             _ => {
                 println!("Unknown Packet Format");
-                rt_send_error_packet(&generic_error, &mut stream);
+                authen_sess.send_error_packet( &mut stream);
                 continue;
             },
         }
@@ -656,16 +663,6 @@ unsafe fn rt_get_avg() -> f64{
 
 unsafe fn rt_get_runs() -> f64 {
     return RUNS;
-}
-
-fn rt_send_error_packet(msg: &[u8], stream: &mut TcpStream) {
-    // It's just a header, it shouldn't reveal anything interesting.
-    match stream.write(msg) {
-        Ok(v) => println!("Ratchet Debug: Sent {} bytes", v),
-        Err(e) =>  //{
-            println!("Ratchet Error: TCP Error, {}", e),
-        //},
-    }
 }
 
 fn rt_get_user_name() -> String {

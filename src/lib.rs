@@ -6,7 +6,7 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use std::{fmt, io::Read, net::TcpStream};
+use std::{fmt, io::Read, io::Write, net::TcpStream};
 const TACP_HEADER_MAX_LENGTH: usize = 12; // 12 bytes.
  
 /// This macro generates a fn, from_byte for 
@@ -668,9 +668,55 @@ pub struct RTAcctPacket {
 
 }
 
-struct RTAuthenSess {
+pub struct RTAuthenSess<'a> {
     rt_curr_seqno : u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
     rt_my_sessid : u32,
+    rt_key : &'a str,
+}
+
+impl<'a> RTAuthenSess<'a> {
+    pub fn from_header(r: &RTHeader, key: &'a str) -> Self {
+        Self { rt_curr_seqno: r.tacp_hdr_seqno,
+               rt_my_sessid: r.tacp_hdr_sesid,
+               rt_key: key,
+        }
+    }
+
+    pub fn next_header(&mut self, reply: &RTAuthenReplyPacket) -> RTHeader {
+        return RTHeader::get_resp_header(self.rt_my_sessid, &reply, self.rt_curr_seqno)
+    }
+
+    pub fn send_error_packet(&mut self, stream: &mut TcpStream) -> Result<bool, &str> {
+        let generic_error = RTAuthenReplyPacket::get_error_packet();
+        let generic_error_header: RTHeader = self.next_header(&generic_error);
+
+        let pad = generic_error_header.compute_md5_pad( self.rt_key );
+        let mut payload = md5_xor(&generic_error.serialize(), &pad);
+        let mut msg = generic_error_header.serialize();
+        msg.append(&mut payload);
+
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg) {
+            Ok(v) => {
+                println!("Ratchet Debug: Sent {} bytes", v);
+                self.inc_seqno();
+                Ok(true)
+            },
+            Err(e) =>  {
+                println!("Ratchet Error: TCP Error, {}", e);
+                Err("Bad TCP Session")
+            },
+        }
+    }
+
+    fn inc_seqno(&mut self) -> Result<bool, &str> {
+        if self.rt_curr_seqno == 255 {
+            return Err("Session restart");
+        } else {
+            self.rt_curr_seqno += 1;
+            return Ok(true);
+        }
+    }
 }
 
 #[allow(clippy::indexing_slicing)]
