@@ -9,11 +9,16 @@
 use libc::{mlockall, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT};
 
 
+use std::array;
 use std::env;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::process::exit;
 use std::process::Command;
 use std::collections::HashMap;
 use std::net::TcpListener;
+use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -26,9 +31,6 @@ use ratchet::RTTACType;
 use ratchet::RTAuthenPacket;
 use ratchet::RTDecodedPacket;
 use ratchet::RTAuthenReplyPacket;
-
-const SECRET_KEY: &str = "testing123"; // TODO: When building a red-black tree of clients, 
-                                    //ensure that they are required to have a secret, or not clients.
 
 struct RTServerSettings<'a> {
     rt_server_max_length : u32, // = 65535, // https://www.rfc-editor.org/rfc/rfc8907.html#section-4.1-18
@@ -67,32 +69,50 @@ pub fn main() {
 
     // Create a new HashMap
     let mut credentials: HashMap<String, String> = HashMap::new();
+    let mut clients_v4: [HashMap<u32, String>; 33] = array::from_fn(|_| HashMap::new());
+    let mut clients_v6: [HashMap<u128, String>; 129] = array::from_fn(|_| HashMap::new());
 
-
+    let mut custom_clients_cmd = String::new();
     let mut custom_creds_cmd = String::new(); // Use String instead of &str
     for (key, value) in env::vars() {
         if key == "RATCHET_READ_CLIENTS" {
+            custom_clients_cmd = value; // Directly assign the value
+        } else if key == "RATCHET_READ_CREDS" {
             custom_creds_cmd = value; // Directly assign the value
         }
     }
     
+    if !custom_clients_cmd.is_empty() {
+        server_settings.rt_server_read_creds = custom_clients_cmd.as_str(); // Use the String here
+        
+        // Use the configured command to obtain creds.
+        rt_obtain_clients(server_settings.rt_server_read_creds, &mut clients_v4, &mut clients_v6);
+    }
+
     if !custom_creds_cmd.is_empty() { 
         server_settings.rt_server_read_creds = custom_creds_cmd.as_str(); // Use the String here
         
         // Use the configured command to obtain creds.
         rt_obtain_creds(server_settings.rt_server_read_creds, &mut credentials, server_settings.rt_server_i18n);
-    }
-    
+    }    
 
     // Check if the specific argument is present
     if env::args().any(|x| x == *"--add-insecure-test-credential-do-not-use".to_string()) {
         credentials.insert("username".to_string(), "123456".to_string());
+        rt_obtain_clients("echo '127.0.0.1,testing123'", &mut clients_v4, &mut clients_v6);
     }
 
     // Check if the specific argument is present
     if env::args().any(|x| x == *"--add-basic-db-test-do-not-use".to_string()) {
         rt_obtain_creds("echo 'user1,extremely_secure_pass\nuser2,unbelievable_password\nuser3,awesome_password'", &mut credentials, server_settings.rt_server_i18n);
+        rt_obtain_clients("echo '127.0.0.1,testing123'", &mut clients_v4, &mut clients_v6);
     }
+
+        // Check if the specific argument is present
+        if env::args().any(|x| x == *"--add-huge-wildcard-test-do-not-use".to_string()) {
+            credentials.insert("username".to_string(), "123456".to_string());
+            rt_obtain_clients("echo '0.0.0.0/0,testing123'", &mut clients_v4, &mut clients_v6);
+        }
 
     if env::args().any(|x| x == *"--ignore-i18n".to_string()) {
         server_settings.rt_server_i18n = false;
@@ -176,6 +196,22 @@ pub fn main() {
             },
         };
 
+        // Stage 0.5: Determine if this is a client
+        // TODO: completely encapsulate this into the session eventually...
+        let SECRET_KEY = match rt_fetch_secret(&stream.peer_addr().unwrap().ip(), &clients_v4, &clients_v6) {
+            Ok(s) => s,
+            Err(e) => {
+                println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
+                continue;
+            },
+        };
+        
+
+        if SECRET_KEY == "" {
+            println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
+            continue;
+        }
+
         // Stage 1: Parse header, establish session
         let hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, 0) { 
             Ok(h) => {
@@ -233,7 +269,7 @@ pub fn main() {
                             //let mut retries = 0;
 
                             // Stage 1: Fetch the Username
-                            let mut obtained_username= if asp.user.len() == 0 { // have to fetch username
+                            let obtained_username= if asp.user.len() == 0 { // have to fetch username
                                     match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
                                         Ok(u) => u,
                                         Err(_) => {
@@ -245,33 +281,14 @@ pub fn main() {
                                     String::from_utf8_lossy(&asp.user).to_string()
                                 };
 
+                            // no retries.
                             if obtained_username.len() == 0 {
-                                obtained_username= if asp.user.len() == 0 { // have to fetch username
-                                    match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
-                                        Ok(u) => u,
-                                        Err(_) => {
-                                            authen_sess.send_error_packet(&mut stream);
-                                            continue;
-                                        },
-                                    }
-                                } else {
-                                    String::from_utf8_lossy(&asp.user).to_string()
-                                };
-                            }
-
-                            // just one do-over.
-                            if obtained_username.len() == 0 {
-                                obtained_username= if asp.user.len() == 0 { // have to fetch username
-                                    match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
-                                        Ok(u) => u,
-                                        Err(_) => {
-                                            authen_sess.send_error_packet(&mut stream);
-                                            continue;
-                                        },
-                                    }
-                                } else {
-                                    String::from_utf8_lossy(&asp.user).to_string()
-                                };
+                                // buzz off
+                                match authen_sess.send_final_packet(&mut stream,  RTAuthenReplyPacket::get_fail_packet()) {
+                                    Ok(_) => println!("Ratchet Debug: Sent failure packet"),
+                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                }
+                                continue;
                             }
                             
                             // Stage 2: Fetch the Password
@@ -426,6 +443,47 @@ pub fn main() {
     }
 }
 
+fn rt_fetch_secret<'a>(ip: &IpAddr, clients_v4: &'a [HashMap<u32, String>; 33] , clients_v6: &'a [HashMap<u128, String>; 129]) -> Result<&'a String, &'a str> {
+    println!("Ratchet Debug: Thumbing through {:#?} and {:#?}", clients_v4, clients_v6);
+    match ip {
+        std::net::IpAddr::V4(ipv4_addr) => {
+            println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
+            let addr = ipv4_addr.to_bits();
+            let mut mask = 0xFFFFFFFFu32;
+            let mut i = 0;
+            while i <= 32 {
+                println!("Ratchet Debug: Masking result: {}", (addr & mask));
+                match clients_v4[32 - i].get(&(addr & mask)) {
+                    Some(str) => {
+                        return Ok(str);
+                    },
+                    None => (),
+                }
+                i +=1;
+               mask <<= 1;
+            }
+            Err("Unknown client")
+        },
+        std::net::IpAddr::V6(ipv6_addr) => {
+            println!("Ratchet Debug: Seeking out {}", ipv6_addr.to_bits());
+            let addr = ipv6_addr.to_bits();
+            let mut mask = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFu128;
+            let mut i = 0;
+            while i <= 128 {
+                match clients_v6[128 - i].get(&(addr & mask)) {
+                    Some(str) => {
+                        return Ok(str);
+                    },
+                    None => (),
+                }
+                i +=1;
+                mask <<= 1;
+            }
+            Err("Unknown client")    
+        },
+    }
+}
+
 /// For a user-specified shell command string,
 /// expect a CSV list of clients.
 /// 
@@ -473,6 +531,92 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
     }
 }
 
+/// For a user-specified shell command string,
+/// expect a CSV list of clients.
+/// 
+/// Install the CSV list of clients as the users database.
+/// 
+fn rt_obtain_clients(cmd: &str, v4_clients_out: &mut [HashMap<u32, String>; 33], v6_clients_out: &mut [HashMap<u128, String>; 129]) {
+    // Otherwise use rt_server_read_creds to obtain credentials
+    let output = Command::new("sh")
+    .arg("-c")
+    .arg(cmd)
+    .output()
+    .expect("Failed to execute configured command.");
+
+    let data_str = String::from_utf8_lossy(&output.stdout);
+
+    // Split by newline
+    for line in data_str.lines() {
+        // Split each line by comma
+        let parts: Vec<&str> = line.split(',').collect();
+        let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
+
+        // Ensure there are exactly two parts to form a key-value pair
+        if parts.len() == 2 {
+            let key = parts[0].trim().to_string();
+            let value = parts[1].to_string(); // keys can contain spaces in some implementations
+
+            if value.len() == 0 || key.len() == 0 {
+                println!("Ratchet Error: Must have valid network and secret, skipping {}", key);
+            }
+
+            let key_parts: Vec<&str> = key.split('/').collect();
+
+            let net_mask_def = key_parts.len() == 2;
+
+            match Ipv4Addr::from_str(key_parts[0]) {
+                Ok(s) => {
+                    let int_address = s.to_bits();
+                    if !net_mask_def {
+                        v4_clients_out[32].insert(int_address, value);
+                        continue;
+                    } else {
+                        let netmask = match u32::from_str(key_parts[1]) {
+                            Ok(n) => n as usize,
+                            Err(_) => continue,
+                        };
+
+                        if netmask <= 32 && (int_address == (int_address & (IPV4_MASKS[netmask]))) {
+                            v4_clients_out[netmask].insert(int_address, value);
+                        } else {
+                            println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}", key);
+                        }
+                    }
+                },
+                Err(_) => {
+                    match Ipv6Addr::from_str(key_parts[0]) {
+                        Ok(s) =>  {
+                            let int_address = s.to_bits();
+                            if !net_mask_def {
+                                v6_clients_out[128].insert(int_address, value);
+                                continue;
+                            } else {
+                                let netmask = match u32::from_str(key_parts[1]) {
+                                    Ok(n) => n as usize,
+                                    Err(_) => continue,
+                                };
+        
+                                if netmask <= 128 && (int_address == (int_address & (IPV6_MASKS[netmask]))) {
+                                    v6_clients_out[netmask].insert(int_address, value);
+                                } else {
+                                    println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}", key);
+                                }
+                            }
+                        },
+                        Err(_) => {
+                            // Not IPv4 or IPv6 ... discarding.
+                            println!("Ratchet Debug: Bad input, or bad network address, skipping {}", key);
+                        },
+                    }
+                }
+            };
+            
+            println!("Ratchet Debug: Installed client {}", key);
+        }
+    }
+}
+
 unsafe fn rt_get_avg() -> f64{
     return RUNNING_AVG;
 }
@@ -497,3 +641,45 @@ fn rt_get_user_name() -> String {
         }
     };
 } 
+
+macro_rules! generate_v6netmasks {
+    // Macro for generating netmasks for IPv4 and IPv6
+    ($name:ident, $bits:expr, $size:expr) => {
+        const $name: [u128; $bits + 1] = {
+            let mut masks = [0; $bits + 1];
+            let mut i = 0;
+            while i <= $bits {
+                masks[i] = if i == 0 {
+                    0
+                } else {
+                    (!0u128) << ($size - i)
+                };
+                i += 1;
+            }
+            masks
+        };
+    };
+}
+
+macro_rules! generate_v4netmasks {
+    // Macro for generating netmasks for IPv4 and IPv6
+    ($name:ident, $bits:expr, $size:expr) => {
+        const $name: [u32; $bits + 1] = {
+            let mut masks = [0; $bits + 1];
+            let mut i = 0;
+            while i <= $bits {
+                masks[i] = if i == 0 {
+                    0
+                } else {
+                    (!0u32) << ($size - i)
+                };
+                i += 1;
+            }
+            masks
+        };
+    };
+}
+
+// Generate IPv4 and IPv6 masks
+generate_v4netmasks!(IPV4_MASKS, 32, 32);
+generate_v6netmasks!(IPV6_MASKS, 128, 128);

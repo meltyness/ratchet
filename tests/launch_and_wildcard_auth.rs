@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[test]
-fn end_to_end_test_ascii_authentication() {
+fn end_to_end_test_wildcard_netmask() {
     println!("{}", cfg!(debug_assertions));
     let argslist = 
     if cfg!(debug_assertions) {
-        vec!["run", "--", "--add-insecure-test-credential-do-not-use"]
+        vec!["run", "--", "--add-huge-wildcard-test-do-not-use"]
     } else {
-        vec!["run", "--release", "--", "--add-insecure-test-credential-do-not-use"]
+        vec!["run", "--release", "--", "--add-huge-wildcard-test-do-not-use"]
     };
 
     // Start the server
@@ -62,7 +62,7 @@ fn end_to_end_test_ascii_authentication() {
 
     // Run the Perl script and capture its output
     let output = Command::new("perl")
-        .args([&format!("{}/test.pl", d.display()), "ascii"])
+        .arg(format!("{}/test.pl", d.display()))
         .output()
         .expect("Failed to execute perl script");
 
