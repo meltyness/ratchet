@@ -6,7 +6,7 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use libc::{mlockall, madvise, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT, MADV_WILLNEED};
+use libc::{mlockall, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT};
 
 
 use std::env;
