@@ -47,16 +47,6 @@ struct RTKnownClient {
 
 }
 
-fn prefetch_memory_region(start_addr: *const u8, length: usize) {
-    let result = unsafe { madvise(start_addr as *mut _, length, MADV_WILLNEED) };
-
-    if result != 0 {
-        eprintln!("madvise failed");
-    } else {
-        println!("Memory region prefetched successfully");
-    }
-}
-
 static mut RUNS: f64 = 0.0;
 static mut RUNNING_AVG: f64 = 0.0;
 static mut FIRST_RUN: Option<Instant> = None;
@@ -125,9 +115,7 @@ pub fn main() {
         }
     }
 
-
     println!("Ratchet Info: NOWLISTENING bound to some port 49");
-
 
     unsafe {
         ctrlc::set_handler(move || {
@@ -240,21 +228,51 @@ pub fn main() {
                             //      ... the server must be multithreaded or implement read/write timeout.
                             //      ... better to go multithreaded.
                             println!("Ratchet Info: Decoded: {}", asp);
+                            
                             // (sort of) Authenticate the server before putting a cred on the line
-                            let mut retries = 0;
+                            //let mut retries = 0;
 
                             // Stage 1: Fetch the Username
-                            let obtained_username= if asp.user.len() == 0 { // have to fetch username
-                                match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
-                                    Ok(u) => u,
-                                    Err(_) => {
-                                        authen_sess.send_error_packet(&mut stream);
-                                        continue;
-                                    },
-                                }
-                            } else {
-                                String::from_utf8_lossy(&asp.user).to_string()
-                            };
+                            let mut obtained_username= if asp.user.len() == 0 { // have to fetch username
+                                    match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
+                                        Ok(u) => u,
+                                        Err(_) => {
+                                            authen_sess.send_error_packet(&mut stream);
+                                            continue;
+                                        },
+                                    }
+                                } else {
+                                    String::from_utf8_lossy(&asp.user).to_string()
+                                };
+
+                            if obtained_username.len() == 0 {
+                                obtained_username= if asp.user.len() == 0 { // have to fetch username
+                                    match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
+                                        Ok(u) => u,
+                                        Err(_) => {
+                                            authen_sess.send_error_packet(&mut stream);
+                                            continue;
+                                        },
+                                    }
+                                } else {
+                                    String::from_utf8_lossy(&asp.user).to_string()
+                                };
+                            }
+
+                            // just one do-over.
+                            if obtained_username.len() == 0 {
+                                obtained_username= if asp.user.len() == 0 { // have to fetch username
+                                    match authen_sess.do_get(&mut stream, RTAuthenReplyPacket::get_getuser_packet()) {
+                                        Ok(u) => u,
+                                        Err(_) => {
+                                            authen_sess.send_error_packet(&mut stream);
+                                            continue;
+                                        },
+                                    }
+                                } else {
+                                    String::from_utf8_lossy(&asp.user).to_string()
+                                };
+                            }
                             
                             // Stage 2: Fetch the Password
                             // TODO: Everybody gets one
