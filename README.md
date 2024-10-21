@@ -21,7 +21,8 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 
 ## Future plans
 - [ ] Multi-threaded implementation
-  - [ ] the ASCII protocol couples too tightly, yikes!      
+  - [ ] the ASCII protocol couples too tightly, yikes!
+- [ ] beautiful front-end  
 - [x] ASCII Authentication
 - [ ] Configuration
   - [x] Configurable user list
@@ -31,7 +32,6 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 
 
 Later
-- [ ] beautiful front-end
 - [ ] Benchmarks / 
 - [ ] Rest of the protocol / MSCHAPv2
 - [ ] Support for complete set of security controls
