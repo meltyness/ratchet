@@ -20,6 +20,8 @@ This server implements a slim portion of the TACACS+ protocol.
 It's very fast and lightweight, with compiler optimization enabled, on a low-end system in a basic configuration, I've seen it service as many as 75,000 requests / sec -- even single-threaded.
 
 ## Future plans
+- [ ] Multi-threaded implementation
+  - [ ] the ASCII protocol couples too tightly, yikes!      
 - [x] ASCII Authentication
 - [ ] Configuration
   - [x] Configurable user list
@@ -30,7 +32,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 
 Later
 - [ ] beautiful front-end
-- [ ] Benchmarks / Multi-threaded implementation
+- [ ] Benchmarks / 
 - [ ] Rest of the protocol / MSCHAPv2
 - [ ] Support for complete set of security controls
   - [ ] ... and automated auditing
