@@ -118,6 +118,14 @@ pub fn main() {
         Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, rt_get_user_name()),
     };
 
+    // polish applied: https://github.com/rust-lang/rust/issues/67027
+    match listener.set_nonblocking(false) {
+        Ok(_) => (),
+        Err(_) => {
+            println!("Ratchet Debug: Couldn't set listener non-blocking, proceeding anyway.")
+        }
+    }
+
     let generic_error = RTAuthenReplyPacket::get_error_packet().serialize();
 
     println!("Ratchet Info: NOWLISTENING bound to some port 49");
@@ -158,12 +166,22 @@ pub fn main() {
                                                                                |addr| addr.to_string())); 
                                                                                 // it *doesn't* take two to tango?
                 println!("Ratchet Debug: Other connection info: Read Timeout: {:#?}, Write Timeout: {:#?}", s.read_timeout(),s.write_timeout());
+
+                // This shouldn't be bandwidth-intensive enough, prefer latency optimization and disable Nagle's
                 match s.set_nodelay(true) {
                     Ok(_) => (),
                     Err(_) => {
                         println!("Ratchet Debug: Couldn't disable Nagles for this Socket, proceeding anyway.");
                     },
                 };
+
+                // polish applied: https://github.com/rust-lang/rust/issues/67027
+                match s.set_nonblocking(false) {
+                    Ok(_) => (),
+                    Err(_) => {
+                        println!("Ratchet Debug: Couldn't set stream non-blocking, proceeding anyway.")
+                    }
+                }
                 s // hand over the TcpStream
             },
             Err(e) => { 

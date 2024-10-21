@@ -27,6 +27,17 @@ macro_rules! impl_from_byte {
     };
 }
 
+/// This macro generates a fn, from_byte for 
+///  - a given u8-enum type, and
+///  - list of applicable variants.
+macro_rules! impl_global_consts {
+    ($enum_name:ident $(,$variant:ident)+) => {
+        $(
+            const $variant: u8 = ($enum_name::$variant as u8);
+        )+
+    };
+}
+
 /// This represents the TACACS+ Header
 #[derive(Debug)]
 pub struct RTHeader {
@@ -86,16 +97,14 @@ impl RTHeader {
     pub fn parse_init_header(stream: &mut TcpStream) -> Result<Self, &str> {
         let mut hdr_buf: [u8; TACP_HEADER_MAX_LENGTH] = [0u8; TACP_HEADER_MAX_LENGTH];
         
+        // TODO: this blocks.
         if stream.read_exact(&mut hdr_buf).is_err() { return Err("Segment too short, check client implementation.") }
         
         let ret = Self {
             tacp_hdr_version: RTTACVersion::from_byte(hdr_buf[0])?,
             tacp_hdr_type:    RTTACType::from_byte(hdr_buf[1])?,
             tacp_hdr_seqno:   match hdr_buf[2] { 1u8 => Ok(1), _ => Err("Invalid initial sequence number")}?,
-                                                // TODO: why is this always unreachable unless 
-                                                // hardcoded, is this a linter that's wrong???
-                                                // https://doc.rust-lang.org/reference/items/enumerations.html
-            tacp_hdr_flags:   match hdr_buf[3] { 0 => Ok(0), _ => Err("Single-session Mode Not Implemented, must be encrypted.")}?,
+            tacp_hdr_flags:   match hdr_buf[3] { TAC_PLUS_NULL_FLAG => Ok(0), _ => Err("Single-session Mode Not Implemented, must be encrypted.")}?,
             tacp_hdr_sesid:   read_be_u32(&mut &hdr_buf[4..8]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,  
             tacp_hdr_length:  read_be_u32(&mut &hdr_buf[8..12]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,
         };
@@ -117,6 +126,7 @@ impl RTHeader {
         let md5pad = self.compute_md5_pad(key);
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
 
+        // TODO: this blocks
         if stream.read_exact(&mut pck_buf).is_err() { 
             return Err("Segment too short, check client implementation.");
         }
@@ -198,6 +208,9 @@ enum RTTACFlag {
     TAC_PLUS_UNENCRYPTED_FLAG = 0x01,    // Generate a warnings,
     TAC_PLUS_SINGLE_CONNECT_FLAG = 0x04, // different set of behaviors, TODO: Later. https://www.rfc-editor.org/rfc/rfc8907.html#name-single-connection-mode
 }
+
+impl_global_consts!(RTTACFlag,
+                    TAC_PLUS_NULL_FLAG);
 
 #[derive(Debug)]
 pub enum RTDecodedPacket {
@@ -441,12 +454,32 @@ pub enum RTAuthenReplyStatus {
     TAC_PLUS_AUTHEN_STATUS_FOLLOW = 0x21,
 }
 
+impl_global_consts!(RTAuthenReplyStatus,
+    TAC_PLUS_AUTHEN_STATUS_PASS,
+    TAC_PLUS_AUTHEN_STATUS_FAIL,
+    TAC_PLUS_AUTHEN_STATUS_GETDATA,
+    TAC_PLUS_AUTHEN_STATUS_GETUSER,
+    TAC_PLUS_AUTHEN_STATUS_GETPASS,
+    TAC_PLUS_AUTHEN_STATUS_RESTART,
+    TAC_PLUS_AUTHEN_STATUS_ERROR,
+    TAC_PLUS_AUTHEN_STATUS_FOLLOW
+);
+
 impl RTAuthenReplyPacket {
+    pub fn get_getpass_packet() -> Self {
+        Self {
+            status: TAC_PLUS_AUTHEN_STATUS_GETPASS,
+            flags: 0,
+            server_msg_len: 0,
+            data_len: 0,
+            server_msg: vec![],
+            data: vec![],
+        }
+    }
+
     pub fn get_success_packet() -> Self {
         Self {
-            status: 1, // TODO: This shouldn't be hardcoded, problem with representing 
-                        // look harder at https://doc.rust-lang.org/reference/items/enumerations.html
-                        // want to be able to express this as an enum value / discriminant... how?
+            status: TAC_PLUS_AUTHEN_STATUS_PASS,
             flags: 0,
             server_msg_len: 0,
             data_len: 0,
@@ -457,7 +490,7 @@ impl RTAuthenReplyPacket {
 
     pub fn get_fail_packet() -> Self {
         Self {
-            status: 2, // TODO: This shouldn't be hardcoded
+            status: TAC_PLUS_AUTHEN_STATUS_FAIL,
             flags: 0,
             server_msg_len: 0,
             data_len: 0,
@@ -469,7 +502,7 @@ impl RTAuthenReplyPacket {
     
     pub fn get_error_packet() -> Self {
         Self {
-            status: 7, // TODO: This shouldn't be hardcoded
+            status: TAC_PLUS_AUTHEN_STATUS_ERROR,
             flags: 0,
             server_msg_len: 67,
             data_len: 0,
