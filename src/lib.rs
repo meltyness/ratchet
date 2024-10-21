@@ -6,7 +6,7 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use std::{fmt, io::Read, net::TcpStream};
+use std::{fmt, io::Read, io::Write, net::TcpStream};
 const TACP_HEADER_MAX_LENGTH: usize = 12; // 12 bytes.
  
 /// This macro generates a fn, from_byte for 
@@ -73,12 +73,12 @@ impl RTHeader {
     /// TOOD: Do we want to abstract the session beyond the behaviors specified
     /// in the main loop? why?
     /// 
-    pub fn get_resp_header(ses : u32, r : &RTAuthenReplyPacket, cur_seq: u8) -> Self {
+    pub fn get_resp_header(ses : u32, r : &RTAuthenReplyPacket, cur_seq: u8, version: u8) -> Self {
         #[allow(clippy::cast_possible_truncation)]
         let lt = r.serialize().len() as u32;
         let seq_no = cur_seq + 1;
         Self {
-            tacp_hdr_version: RTTACVersion::TAC_PLUS_MINOR_VER_ONE,
+            tacp_hdr_version: RTTACVersion::from_byte(version).expect("We only ingest valid versions"),
             tacp_hdr_type: RTTACType::TAC_PLUS_AUTHEN,
             tacp_hdr_seqno: seq_no,
             tacp_hdr_flags: 0,
@@ -127,7 +127,7 @@ impl RTHeader {
         let ret = Self {
             tacp_hdr_version: RTTACVersion::from_byte(hdr_buf[0])?,
             tacp_hdr_type:    RTTACType::from_byte(hdr_buf[1])?,
-            tacp_hdr_seqno:   match hdr_buf[2] { exp_seq => Ok(exp_seq), _ => Err("Invalid initial sequence number")}?,
+            tacp_hdr_seqno:   (if hdr_buf[2] == exp_seq { Ok(exp_seq) } else {Err("Invalid initial sequence number")})?,
             tacp_hdr_flags:   match hdr_buf[3] { TAC_PLUS_NULL_FLAG => Ok(0), _ => Err("Single-session Mode Not Implemented, must be encrypted.")}?,
             tacp_hdr_sesid:   read_be_u32(&mut &hdr_buf[4..8]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,  
             tacp_hdr_length:  read_be_u32(&mut &hdr_buf[8..12]).map_or(Err("read_be_u32 can only process 4-slices"), Ok)?,
@@ -668,9 +668,167 @@ pub struct RTAcctPacket {
 
 }
 
-struct RTAuthenSess {
+pub struct RTAuthenSess<'a> {
     rt_curr_seqno : u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
     rt_my_sessid : u32,
+    rt_my_version : u8,
+    rt_key : &'a str,
+}
+
+impl<'a> RTAuthenSess<'a> {
+    pub fn from_header(r: &RTHeader, key: &'a str) -> Self {
+        Self { rt_curr_seqno: r.tacp_hdr_seqno,
+               rt_my_sessid: r.tacp_hdr_sesid,
+               rt_my_version: (r.tacp_hdr_version.clone() as u8),
+               rt_key: key,
+        }
+    }
+
+    pub fn next_header(&mut self, reply: &RTAuthenReplyPacket) -> RTHeader {
+        return RTHeader::get_resp_header(self.rt_my_sessid, &reply, self.rt_curr_seqno, self.rt_my_version)
+    }
+
+    pub fn do_get(&mut self, mut stream: &mut TcpStream, get_user_packet: RTAuthenReplyPacket) -> Result<String, &str> {
+        // TODO: Refactor this mantra into a neatly architected thingamajig
+        //   ... maybe the 'outermost' detail needed is the session info (i.e., expected pack number, expected sesid), so
+        //   ... it should be a part of a session implementation for the full transaction.
+        let user_resp_hdr = self.next_header(&get_user_packet);
+        println!("Ratchet Debug: {:#?}", user_resp_hdr);
+        println!("Ratchet Debug: {:#?}", get_user_packet);
+        let pad = user_resp_hdr.compute_md5_pad( self.rt_key );
+        let mut payload = md5_xor(&get_user_packet.serialize(), &pad);
+        let mut msg = user_resp_hdr.serialize();
+        msg.append(&mut payload);
+
+        println!("{:?}", msg);
+        // TODO: This blocks
+        match stream.write(&msg) {
+            Ok(v) => {
+                if self.inc_seqno().is_err() { return Err("Wrapped sequence number, restart single-session") }
+                println!("Ratchet Debug: Sent {} bytes", v)
+            },
+            Err(e) => 
+                println!("Ratchet Error: TCP Error, {}", e),
+            //},
+        }
+
+        // TODO: Ok... session loop is starting over...? Not really it's a sequence .... hmmmmmmmmm...
+        let user_hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, self.rt_curr_seqno) { 
+            Ok(h) => {
+                //println!("Ratchet Debug: Processed {:#?}", h); 
+                if self.inc_seqno().is_err() { return Err("Wrapped sequence number, restart single-session") }
+                h
+            },
+            Err(e) => {
+                println!("Ratchet Error: {}", e);
+                self.send_error_packet( &mut stream);
+                return Err("Bad header from client");
+            },
+        };
+
+        let user_contents = match user_hdr.tacp_hdr_type {
+            RTTACType::TAC_PLUS_AUTHEN => user_hdr.parse_authen_packet(&mut stream, self.rt_key),
+            RTTACType::TAC_PLUS_AUTHOR => {
+                println!("Ratchet Debug: Not Implemented");
+                self.send_error_packet( &mut stream);
+                return Err("Unexpected Authorization reply from client");
+            },
+            RTTACType::TAC_PLUS_ACCT => {
+                println!("Ratchet Debug: Not Implemented");
+                self.send_error_packet( &mut stream);
+                return Err("Unexpected Accounting reply from client");
+            },
+        };
+
+        let decoded_user: RTDecodedPacket = match user_contents {
+            Err(e) => { 
+                println!("Ratchet Error: {}", e); 
+                self.send_error_packet( &mut stream);
+                return Err("Invalid data passed in GetUser body");
+            }
+            Ok(d) => {
+                //println!("Ratchet Debug: Processed {:#?}", d); 
+                d
+            },
+        };
+
+        println!("Ratchet Debug: Deciding on decoded user packet");
+        match decoded_user {
+            RTDecodedPacket::RTAuthenPacket(rtauthen_user_packet) => {
+                println!("Ratchet Debug: Was authen packet, checking for Continue");
+                match rtauthen_user_packet {
+                    RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
+                        Ok(String::from_utf8_lossy(&rtauthen_continue_packet.user_msg.clone()).to_string())
+                    },
+                    _ => {
+                        println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                        self.send_error_packet( &mut stream);
+                        return Err("Invalid data passed in GetUser body");
+                    },
+                }
+            },
+            _ => { 
+                println!("Ratchet Error: Non authen packet in Authen sequence");
+                println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence"); 
+                self.send_error_packet( &mut stream);
+                return Err("Invalid data passed in GetUser body");
+            },
+        }
+    }
+
+    pub fn send_final_packet(&mut self, stream: &mut TcpStream, generic_error: RTAuthenReplyPacket) -> Result<bool, &str> {
+        let generic_error_header: RTHeader = self.next_header(&generic_error);
+
+        let pad = generic_error_header.compute_md5_pad( self.rt_key );
+        let mut payload = md5_xor(&generic_error.serialize(), &pad);
+        let mut msg = generic_error_header.serialize();
+        msg.append(&mut payload);
+
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg) {
+            Ok(v) => {
+                println!("Ratchet Debug: Sent {} bytes", v);
+                if self.inc_seqno().is_err() { return Err("Wrapped sequence number, restart single-session") }
+                Ok(true)
+            },
+            Err(e) =>  {
+                println!("Ratchet Error: TCP Error, {}", e);
+                Err("Bad TCP Session")
+            },
+        }
+    }
+
+    pub fn send_error_packet(&mut self, stream: &mut TcpStream) -> bool {
+        let generic_error = RTAuthenReplyPacket::get_error_packet();
+        let generic_error_header: RTHeader = self.next_header(&generic_error);
+
+        let pad = generic_error_header.compute_md5_pad( self.rt_key );
+        let mut payload = md5_xor(&generic_error.serialize(), &pad);
+        let mut msg = generic_error_header.serialize();
+        msg.append(&mut payload);
+
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg) {
+            Ok(v) => {
+                println!("Ratchet Debug: Sent {} bytes", v);
+                if self.inc_seqno().is_err() { return false }
+                true
+            },
+            Err(e) =>  {
+                println!("Ratchet Error: TCP Error, {}", e);
+                false
+            },
+        }
+    }
+
+    fn inc_seqno(&mut self) -> Result<bool, &str> {
+        if self.rt_curr_seqno == 255 {
+            return Err("Session restart");
+        } else {
+            self.rt_curr_seqno += 1;
+            return Ok(true);
+        }
+    }
 }
 
 #[allow(clippy::indexing_slicing)]

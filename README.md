@@ -38,6 +38,8 @@ Later
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
 - [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
+- [ ] Something to meaningfully improve using GNS3 to run tests over this
+  - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
 ## Kernel Hacking / Optimization
 I discovered that when using `perf` to profile `ratchet` that the pipeline was 30% faster, which was,... odd.
