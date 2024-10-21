@@ -20,7 +20,7 @@ This server implements a slim portion of the TACACS+ protocol.
 It's very fast and lightweight, with compiler optimization enabled, on a low-end system in a basic configuration, I've seen it service as many as 75,000 requests / sec -- even single-threaded.
 
 ## Future plans
-- [ ] ASCII Authentication
+- [x] ASCII Authentication
 - [ ] Configuration
   - [x] Configurable user list
   - [ ] Configurable clients list
