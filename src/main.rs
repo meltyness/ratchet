@@ -74,11 +74,14 @@ pub fn main() {
 
     let mut custom_clients_cmd = String::new();
     let mut custom_creds_cmd = String::new(); // Use String instead of &str
+    let mut custom_hostport = String::from("[::]:44449");
     for (key, value) in env::vars() {
         if key == "RATCHET_READ_CLIENTS" {
             custom_clients_cmd = value; // Directly assign the value
         } else if key == "RATCHET_READ_CREDS" {
             custom_creds_cmd = value; // Directly assign the value
+        } else if key == "RATCHET_CUST_HOSTPORT" {
+            custom_hostport = value; // Directly assign the value
         }
     }
     
@@ -120,7 +123,7 @@ pub fn main() {
 
     let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
 
-    let listener = match TcpListener::bind("[::]:44449") {
+    let listener = match TcpListener::bind(custom_hostport.as_str()) {
         Ok(l) => l,
         #[allow(clippy::panic)] // this is definitely fatal for a server.
         Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, rt_get_user_name()),
