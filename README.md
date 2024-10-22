@@ -25,7 +25,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 - [ ] beautiful front-end  
 - [ ] Logging
 
-Later
+### Later
 - [ ] Benchmarks / 
 - [ ] Rest of the protocol / MSCHAPv2
 - [ ] Support for complete set of security controls
@@ -37,7 +37,7 @@ Later
 - [ ] Something to meaningfully improve using GNS3 to run tests over this
   - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
-Done
+### Done
 - [x] ASCII Authentication
 - [x] Configuration
   - [x] Configurable user list
