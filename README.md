@@ -23,13 +23,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 - [ ] Multi-threaded implementation
   - [ ] the ASCII protocol couples too tightly, yikes!
 - [ ] beautiful front-end  
-- [x] ASCII Authentication
-- [ ] Configuration
-  - [x] Configurable user list
-  - [x] Configurable clients list
-  - [ ] Configurable port
 - [ ] Logging
-
 
 Later
 - [ ] Benchmarks / 
@@ -42,6 +36,13 @@ Later
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
 - [ ] Something to meaningfully improve using GNS3 to run tests over this
   - [ ] ... or maybe setup like a dynaMIPS thing some way how
+
+Done
+- [x] ASCII Authentication
+- [x] Configuration
+  - [x] Configurable user list
+  - [x] Configurable clients list
+  - [x] Configurable port
 
 ## Kernel Hacking / Optimization
 I discovered that when using `perf` to profile `ratchet` that the pipeline was 30% faster, which was,... odd.
