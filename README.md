@@ -26,7 +26,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 - [x] ASCII Authentication
 - [ ] Configuration
   - [x] Configurable user list
-  - [ ] Configurable clients list
+  - [x] Configurable clients list
   - [ ] Configurable port
 - [ ] Logging
 
