@@ -118,10 +118,9 @@ pub fn main() {
         server_settings.rt_server_i18n = false;
     }
 
-
     let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
 
-    let listener = match TcpListener::bind("0.0.0.0:44449") {
+    let listener = match TcpListener::bind("[::]:44449") {
         Ok(l) => l,
         #[allow(clippy::panic)] // this is definitely fatal for a server.
         Err(e) => panic!("Ratchet Error: {} check permissions for user: {:#?}.", e, rt_get_user_name()),
@@ -459,27 +458,50 @@ fn rt_fetch_secret<'a>(ip: &IpAddr, clients_v4: &'a [HashMap<u32, String>; 33] ,
                     },
                     None => (),
                 }
-                i +=1;
+                i += 1;
                mask <<= 1;
             }
             Err("Unknown client")
         },
         std::net::IpAddr::V6(ipv6_addr) => {
-            println!("Ratchet Debug: Seeking out {}", ipv6_addr.to_bits());
-            let addr = ipv6_addr.to_bits();
-            let mut mask = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFu128;
-            let mut i = 0;
-            while i <= 128 {
-                match clients_v6[128 - i].get(&(addr & mask)) {
-                    Some(str) => {
-                        return Ok(str);
-                    },
-                    None => (),
-                }
-                i +=1;
-                mask <<= 1;
+            match ipv6_addr.to_ipv4_mapped() {
+                Some(ipv4_addr) => {
+                    println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
+                    let addr = ipv4_addr.to_bits();
+                    let mut mask = 0xFFFFFFFFu32;
+                    let mut i = 0;
+                    while i <= 32 {
+                        println!("Ratchet Debug: Masking result: {}", (addr & mask));
+                        match clients_v4[32 - i].get(&(addr & mask)) {
+                            Some(str) => {
+                                return Ok(str);
+                            },
+                            None => (),
+                        }
+                        i += 1;
+                        mask <<= 1;
+                    }
+                    Err("Unknown client")
+                },
+                None => {
+                    println!("Ratchet Debug: Seeking out {}", ipv6_addr.to_bits());
+                    let addr = ipv6_addr.to_bits();
+                    let mut mask = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFu128;
+                    let mut i = 0;
+                    while i <= 128 {
+                        match clients_v6[128 - i].get(&(addr & mask)) {
+                            Some(str) => {
+                                return Ok(str);
+                            },
+                            None => (),
+                        }
+                        i += 1;
+                        mask <<= 1;
+                    }
+                    Err("Unknown client")    
+                },
             }
-            Err("Unknown client")    
+            
         },
     }
 }
