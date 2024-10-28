@@ -12,7 +12,7 @@ space_example = ["run", "--release", "--", "\"command list\""]
 [build]
 # target = "x86_64-unknown-linux-musl" # this was worse
 rustflags = [
-    "-C", "code-model=kernel",
+    #"-C", "code-model=kernel",
     "-C", "target-cpu=native",  # Enable CPU-specific optimizations for your machine
     #"-C", "target-feature=+adx,+aes,+avx,+avx2,+bmi1,+bmi2,+cmpxchg16b,+f16c,+fma,+fxsr,+lzcnt,+movbe,+pclmulqdq,+popcnt,+rdrand,+rdseed,+sha,+sse,+sse2,+sse3,+sse4.1,+sse4.2,+ssse3,+xsave,+xsavec,+xsaveopt,+xsaves",
     "-C", "llvm-args=--inline-threshold=25", # Adjust inlining behavior
