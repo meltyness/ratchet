@@ -10,7 +10,7 @@ Look! It's an Axe! No, a hatchet!
 ## Introduction
 This is a TACACS+ server.
 
-It implements (part of) PAP.
+It implements PAP and ASCII.
 
 It's written in a memory-safe language, and has very few dependencies.
 
