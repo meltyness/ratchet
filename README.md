@@ -31,6 +31,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 - [ ] Support for complete set of security controls
   - [ ] ... and automated auditing
   - [ ] ... and 8907 future recs
+  - [ ] ... and authenticating against unrecoverable passwords
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
 - [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
