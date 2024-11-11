@@ -601,7 +601,8 @@ fn rt_obtain_clients(cmd: &str, v4_clients_out: &mut [HashMap<u32, String>; 33],
                             Ok(n) => n as usize,
                             Err(_) => continue,
                         };
-
+                        // TODO: A (probably) faster solution would be to use an immediate / left-shift
+                        //       to fetch the ith mask.
                         if netmask <= 32 && (int_address == (int_address & (IPV4_MASKS[netmask]))) {
                             v4_clients_out[netmask].insert(int_address, value);
                         } else {
