@@ -560,6 +560,19 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
 /// expect a CSV list of clients.
 /// 
 /// Install the CSV list of clients as the users database.
+///
+/// TODO: Consider adjusting the representation to instead be a 
+///        sorted array of the final IP which can associate to
+///        the start IP. Matching progresses as follow: 
+///        
+///       To match a against R_f:
+///         - if a < R_{fi}
+///           - Check if a >= R_{si} => shortest match!
+///           - a matches, or a is unreachable
+///         - else proceed to i++
+///
+///       ? - is this always correct?
+///       ? - does this make worst-case behavior externally reachable; i.e., repeatedly spoofing in 224.0.0.x?
 /// 
 fn rt_obtain_clients(cmd: &str, v4_clients_out: &mut [HashMap<u32, String>; 33], v6_clients_out: &mut [HashMap<u128, String>; 129]) {
     // Otherwise use rt_server_read_creds to obtain credentials
