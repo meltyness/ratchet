@@ -20,8 +20,6 @@ This server implements a slim portion of the TACACS+ protocol.
 It's very fast and lightweight, with compiler optimization enabled, on a low-end system in a basic configuration, I've seen it service as many as 75,000 requests / sec -- even single-threaded.
 
 ## Future plans
-- [ ] Multi-threaded implementation
-  - [ ] the ASCII protocol couples too tightly, yikes!
 - [ ] beautiful front-end  
 - [ ] Logging
 
@@ -39,6 +37,8 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
   - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
 ### Done
+- [x] Multi-threaded implementation
+  - [x] the ASCII protocol couples too tightly, yikes!
 - [x] ASCII Authentication
 - [x] Configuration
   - [x] Configurable user list
