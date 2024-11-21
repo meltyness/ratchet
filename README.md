@@ -22,6 +22,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 ## Future plans
 - [ ] beautiful front-end  
 - [ ] Logging
+- [ ] Support for shadowed passwords instead of,... that.
 
 ### Later
 - [ ] Containerized distribution
