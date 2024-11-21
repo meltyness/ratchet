@@ -22,6 +22,9 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
+use std::thread;
+use std::sync::Arc;
+
 use precis_profiles::precis_core::profile::Profile;
 use precis_profiles::UsernameCasePreserved;
 
@@ -121,7 +124,7 @@ pub fn main() {
         server_settings.rt_server_i18n = false;
     }
 
-    let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
+
 
     let listener = match TcpListener::bind(custom_hostport.as_str()) {
         Ok(l) => l,
@@ -139,14 +142,14 @@ pub fn main() {
 
     println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
-    unsafe {
-        ctrlc::set_handler(move || {
-            println!("Ratchet Debug: Average processing time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
-            println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
-            exit(0);
-        })
-        .expect("Error setting Ctrl-C handler");
-    }
+    // unsafe {
+    //     ctrlc::set_handler(move || {
+    //         println!("Ratchet Debug: Average processing time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
+    //         println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
+    //         exit(0);
+    //     })
+    //     .expect("Error setting Ctrl-C handler");
+    // }
 
     let result = unsafe { mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) };
     if result != 0 {
@@ -155,17 +158,25 @@ pub fn main() {
         println!("mlockall succeeded");
     }
 
-    for stream in listener.incoming() {
-        let start_time = Instant::now();
-        unsafe { RUNS = RUNS + 1.0;
-            match FIRST_RUN {
-                Some(_) => (),
-                None => {
-                    FIRST_RUN = Some(start_time.clone())
-                },
-            }
-        }
+    
+    let credentials_container = Arc::new(credentials);
+    let clients_v4_container = Arc::new(clients_v4);
+    let clients_v6_container = Arc::new(clients_v6);
 
+    for stream in listener.incoming() {
+        // let start_time = Instant::now();
+        // unsafe { RUNS = RUNS + 1.0;
+        //     match FIRST_RUN {
+        //         Some(_) => (),
+        //         None => {
+        //             FIRST_RUN = Some(start_time.clone())
+        //         },
+        //     }
+        // }
+        let clients_v4_container = clients_v4_container.clone();
+        let clients_v6_container = clients_v6_container.clone();
+        let credentials_container = credentials_container.clone();
+        thread::spawn( move || {
         // Stage 0: Check that this is a valid stream, produce some logs about the event.
         let mut stream = match stream {
             Ok(s) => { // TODO: Collect this into session info so that the following diagnostic logs can be associated
@@ -194,24 +205,28 @@ pub fn main() {
             },
             Err(e) => { 
                 println!("Ratchet Error: TCP Error, {}", e);
-                continue;
+                return;
             },
         };
 
+        stream.set_read_timeout(Some(Duration::from_secs(10)));
+
         // Stage 0.5: Determine if this is a client
         // TODO: completely encapsulate this into the session eventually...
-        let SECRET_KEY = match rt_fetch_secret(&stream.peer_addr().unwrap().ip(), &clients_v4, &clients_v6) {
+        let v4_binding = clients_v4_container.clone();
+        let v6_binding = clients_v6_container.clone();
+        let SECRET_KEY = match rt_fetch_secret(&stream.peer_addr().unwrap().ip(), &v4_binding, &v6_binding) {
             Ok(s) => s,
             Err(e) => {
                 println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
-                continue;
+                return;
             },
         };
         
 
         if SECRET_KEY == "" {
             println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
-            continue;
+            return;
         }
 
         // Stage 1: Parse header, establish session
@@ -223,7 +238,7 @@ pub fn main() {
             Err(e) => {
                 println!("Ratchet Error: {}", e);
                 //authen_sess.send_error_packet( &mut stream);
-                continue;
+                return;
             },
         };
 
@@ -235,12 +250,12 @@ pub fn main() {
             RTTACType::TAC_PLUS_AUTHOR => {
                 println!("Ratchet Debug: Not Implemented");
                 authen_sess.send_error_packet( &mut stream);
-                continue;
+                return;
             },
             RTTACType::TAC_PLUS_ACCT => {
                 println!("Ratchet Debug: Not Implemented");
                 authen_sess.send_error_packet( &mut stream);
-                continue;
+                return;
             },
         };
 
@@ -248,7 +263,7 @@ pub fn main() {
             Err(e) => { 
                 println!("Ratchet Error: {}", e); 
                 authen_sess.send_error_packet( &mut stream);
-                continue; 
+                return; 
             }
             Ok(d) => {
                 println!("Ratchet Debug: Processed {:#?}", d); 
@@ -276,7 +291,7 @@ pub fn main() {
                                         Ok(u) => u,
                                         Err(_) => {
                                             authen_sess.send_error_packet(&mut stream);
-                                            continue;
+                                            return;
                                         },
                                     }
                                 } else {
@@ -290,7 +305,7 @@ pub fn main() {
                                     Ok(_) => println!("Ratchet Debug: Sent failure packet"),
                                     Err(e) => println!("Ratchet Error: TCP Error, {}", e),
                                 }
-                                continue;
+                                return;
                             }
                             
                             // Stage 2: Fetch the Password
@@ -300,7 +315,7 @@ pub fn main() {
                                     Ok(u) => u,
                                     Err(_) => {
                                         authen_sess.send_error_packet(&mut stream);
-                                        continue;
+                                        return;
                                     },
                                 };
                             
@@ -310,9 +325,9 @@ pub fn main() {
                                     Ok(_) => println!("Ratchet Debug: Sent failure packet"),
                                     Err(e) => println!("Ratchet Error: TCP Error, {}", e),
                                 }
-                                continue;
+                                return;
                             }
-                            
+                            let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
                             let raw_username = obtained_username;
                             let auth_request_password = obtained_password;
                             let mut user_authenticated = false;
@@ -328,14 +343,14 @@ pub fn main() {
                                     Err(e) => {
                                         println!("Ratchet Error: Invalid username passed, {}", e);
                                         authen_sess.send_error_packet( &mut stream);
-                                        continue;
+                                        return;
                                     },
                                 }
                             } else {
                                 raw_username.try_into().unwrap()
                             };
                             
-                            if let Some(p) = credentials.get(&username.to_string()) {
+                            if let Some(p) = credentials_container.get(&username.to_string()) {
                                 // User known, check authentication success.
                                 println!("Ratchet Debug: Found user with password: {}", p);
                                 println!("Attempting to compare {} to {}", p, auth_request_password);
@@ -365,7 +380,7 @@ pub fn main() {
                             let mut user_authenticated = false;
         
                             println!("Ratchet Debug: Looking up {}", raw_username);
-        
+                            let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
                             let username = if server_settings.rt_server_i18n {
                                 match username_case_preserved.prepare(raw_username) {
                                     Ok(fixed_username) => { 
@@ -375,14 +390,14 @@ pub fn main() {
                                     Err(e) => {
                                         println!("Ratchet Error: Invalid username passed, {}", e);
                                         authen_sess.send_error_packet( &mut stream);
-                                        continue;
+                                        return;
                                     },
                                 }
                             } else {
                                 raw_username
                             };
                             
-                            if let Some(p) = credentials.get(&username.to_string()) {
+                            if let Some(p) = credentials_container.get(&username.to_string()) {
                                 // User known, check authentication success.
                                 println!("Ratchet Debug: Found user with password: {}", p);
                                 println!("Attempting to compare {} to {}", p, auth_request_password);
@@ -408,40 +423,41 @@ pub fn main() {
                         ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_CHAP => {
                             println!("Unknown Packet Format");
                             authen_sess.send_error_packet( &mut stream);
-                            continue;
+                            return;
                         },
                         ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAP => {
                             println!("Unknown Packet Format");
                             authen_sess.send_error_packet( &mut stream);
-                            continue;
+                            return;
                         },
                         ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 => {
                             println!("Unknown Packet Format");
                             authen_sess.send_error_packet( &mut stream);
-                            continue;
+                            return;
                         },
                     }
                 },
                 RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => { 
                     println!("Ratchet Error: umm... no, I'M the server.");
                     authen_sess.send_error_packet( &mut stream);
-                    continue; 
+                    return; 
                 },
                 RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
                     println!("Ratchet Error: Unexpected continue packet!!");
                     authen_sess.send_error_packet( &mut stream);
-                    continue;
+                    return;
                 },
                 // _ => println!("Unknown Authen Packet Format"),
             }
             _ => {
                 println!("Unknown Packet Format");
                 authen_sess.send_error_packet( &mut stream);
-                continue;
+                return;
             },
         }
-        let end_time = Instant::now();
-        unsafe {RUNNING_AVG = RUNNING_AVG + ((end_time - start_time)).as_secs_f64();}
+        });
+        // let end_time = Instant::now();
+        // unsafe {RUNNING_AVG = RUNNING_AVG + ((end_time - start_time)).as_secs_f64();}
     }
 }
 
