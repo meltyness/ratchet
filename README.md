@@ -22,7 +22,9 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 ## Future plans
 - [ ] beautiful front-end  
 - [ ] Logging
-- [ ] Support for shadowed passwords instead of,... that.
+- [ ] Config interfaces
+  - [ ] Support for shadowed passwords instead of,... that.
+  - [ ] Make sure that the CSV escaping makes sense, maybe switch to TSV
 
 ### Later
 - [ ] Containerized distribution
