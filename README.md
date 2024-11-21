@@ -24,6 +24,7 @@ It's very fast and lightweight, with compiler optimization enabled, on a low-end
 - [ ] Logging
 
 ### Later
+- [ ] Containerized distribution
 - [ ] Benchmarks / 
 - [ ] Rest of the protocol / MSCHAPv2
 - [ ] Support for complete set of security controls
