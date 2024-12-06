@@ -209,8 +209,9 @@ pub fn main() {
             },
         };
 
-        stream.set_read_timeout(Some(Duration::from_secs(10)));
-
+        stream.set_read_timeout(Some(Duration::from_secs(10))); // for interactive sessions, the user has to type this fast
+                                                                     // for DoS prevention, the server has to tolerate 2*10*(line rate) sessions
+        stream.set_write_timeout(Some(Duration::from_secs(3)));
         // Stage 0.5: Determine if this is a client
         // TODO: completely encapsulate this into the session eventually...
         let v4_binding = clients_v4_container.clone();
