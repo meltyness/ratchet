@@ -11,7 +11,11 @@ if($ARGV[0] eq "negative") {
 } elsif ($ARGV[0] eq "db") {
 	$username_to_use = "user2";
 	$password_to_use = "unbelievable_password";
-} elsif ($ARGV[0] eq "ascii") {
+} elsif ($ARGV[0] eq "dbreject") {
+	$username_to_use = "user1";
+	$password_to_use = "extremely_secure_pass"; # we can only hope to learn from all of our mistakes
+}  
+elsif ($ARGV[0] eq "ascii") {
 	$auth_mode_to_use = undef;
 }
 
