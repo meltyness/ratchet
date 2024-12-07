@@ -57,8 +57,8 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 - [ ] beautiful front-end  
 - [ ] Logging
 - [ ] Config interfaces
-  - [ ] Support for shadowed passwords instead of,... that.
   - [ ] Make sure that the CSV escaping makes sense, maybe switch to TSV
+- [ ] assess or implement async to retain maximum performance
 
 ### Later
 - [ ] Containerized distribution
@@ -75,6 +75,8 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
   - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
 ### Done
+
+  - [x] Support for shadowed passwords instead of,... that.
 - [x] Multi-threaded implementation
   - [x] the ASCII protocol couples too tightly, yikes!
 - [x] ASCII Authentication
