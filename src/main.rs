@@ -8,25 +8,27 @@
 
 use libc::{mlockall, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT};
 
-
 use std::array;
 use std::env;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use std::process::exit;
 use std::process::Command;
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::str::FromStr;
 use std::time::Duration;
-use std::time::Instant;
+// benchmarking
+//use std::process::exit;
+//use std::time::Instant;
 
 use std::thread;
 use std::sync::Arc;
 
 use precis_profiles::precis_core::profile::Profile;
 use precis_profiles::UsernameCasePreserved;
+
+use pwhash::bcrypt;
 
 use ratchet::RTAuthenSess;
 use ratchet::RTHeader;
@@ -52,9 +54,10 @@ struct RTKnownClient {
 
 }
 
-static mut RUNS: f64 = 0.0;
-static mut RUNNING_AVG: f64 = 0.0;
-static mut FIRST_RUN: Option<Instant> = None;
+// benchmarking
+// static mut RUNS: f64 = 0.0;
+// static mut RUNNING_AVG: f64 = 0.0;
+// static mut FIRST_RUN: Option<Instant> = None;
 
 /// # Panics
 /// 
@@ -104,19 +107,19 @@ pub fn main() {
 
     // Check if the specific argument is present
     if env::args().any(|x| x == *"--add-insecure-test-credential-do-not-use".to_string()) {
-        credentials.insert("username".to_string(), "123456".to_string());
+        credentials.insert("username".to_string(), "$2b$05$iE0X0t4n0Ag8pGR0o6zqn.qBZt9reoIOHAajI1NQNZOun0Mc57uuG".to_string());
         rt_obtain_clients("echo '127.0.0.1,testing123'", &mut clients_v4, &mut clients_v6);
     }
 
     // Check if the specific argument is present
     if env::args().any(|x| x == *"--add-basic-db-test-do-not-use".to_string()) {
-        rt_obtain_creds("echo 'user1,extremely_secure_pass\nuser2,unbelievable_password\nuser3,awesome_password'", &mut credentials, server_settings.rt_server_i18n);
+        rt_obtain_creds("echo 'user1,extremely_secure_pass\nuser2,$2b$05$OIBXZUqfOWT2SHyShytLD.Qwk/XsBJTxFypqvKdfjE2sj5N7SDapC\nuser3,awesome_password'", &mut credentials, server_settings.rt_server_i18n);
         rt_obtain_clients("echo '127.0.0.1,testing123'", &mut clients_v4, &mut clients_v6);
     }
 
         // Check if the specific argument is present
         if env::args().any(|x| x == *"--add-huge-wildcard-test-do-not-use".to_string()) {
-            credentials.insert("username".to_string(), "123456".to_string());
+            credentials.insert("username".to_string(), "$2b$05$iE0X0t4n0Ag8pGR0o6zqn.qBZt9reoIOHAajI1NQNZOun0Mc57uuG".to_string());
             rt_obtain_clients("echo '0.0.0.0/0,testing123'", &mut clients_v4, &mut clients_v6);
         }
 
@@ -142,6 +145,7 @@ pub fn main() {
 
     println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
+    // benchmarking
     // unsafe {
     //     ctrlc::set_handler(move || {
     //         println!("Ratchet Debug: Average processing time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
@@ -164,6 +168,7 @@ pub fn main() {
     let clients_v6_container = Arc::new(clients_v6);
 
     for stream in listener.incoming() {
+        // benchmarking
         // let start_time = Instant::now();
         // unsafe { RUNS = RUNS + 1.0;
         //     match FIRST_RUN {
@@ -209,9 +214,9 @@ pub fn main() {
             },
         };
 
-        stream.set_read_timeout(Some(Duration::from_secs(10))); // for interactive sessions, the user has to type this fast
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(10))); // for interactive sessions, the user has to type this fast
                                                                      // for DoS prevention, the server has to tolerate 2*10*(line rate) sessions
-        stream.set_write_timeout(Some(Duration::from_secs(3)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
         // Stage 0.5: Determine if this is a client
         // TODO: completely encapsulate this into the session eventually...
         let v4_binding = clients_v4_container.clone();
@@ -303,8 +308,8 @@ pub fn main() {
                             if obtained_username.len() == 0 {
                                 // buzz off
                                 match authen_sess.send_final_packet(&mut stream,  RTAuthenReplyPacket::get_fail_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent failure packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent failure packet"),
+                                    Err(e) =>(),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
                                 return;
                             }
@@ -323,8 +328,8 @@ pub fn main() {
                             if obtained_password.len() == 0 || obtained_username.len() == 0 {
                                 // buzz off
                                 match authen_sess.send_final_packet(&mut stream,  RTAuthenReplyPacket::get_fail_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent failure packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent failure packet"),
+                                    Err(e) => (),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
                                 return;
                             }
@@ -354,8 +359,9 @@ pub fn main() {
                             if let Some(p) = credentials_container.get(&username.to_string()) {
                                 // User known, check authentication success.
                                 println!("Ratchet Debug: Found user with password: {}", p);
-                                println!("Attempting to compare {} to {}", p, auth_request_password);
-                                user_authenticated = p == &auth_request_password;
+                                println!("Ratchet XXX: Attempting to compare {} to {}", p, auth_request_password);
+                                user_authenticated = bcrypt::verify(auth_request_password, p);
+                                //user_authenticated = p == &auth_request_password;
                             } else {
                                 println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
                                 // user who? user not authenticated!
@@ -363,14 +369,14 @@ pub fn main() {
         
                             if user_authenticated {
                                 match authen_sess.send_final_packet(&mut stream, RTAuthenReplyPacket::get_success_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent success packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent success packet"),
+                                    Err(e) => (),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
 
                             } else {
                                 match authen_sess.send_final_packet(&mut stream,  RTAuthenReplyPacket::get_fail_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent failure packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent failure packet"),
+                                    Err(e) => (),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
                             }
                         },
@@ -401,8 +407,9 @@ pub fn main() {
                             if let Some(p) = credentials_container.get(&username.to_string()) {
                                 // User known, check authentication success.
                                 println!("Ratchet Debug: Found user with password: {}", p);
-                                println!("Attempting to compare {} to {}", p, auth_request_password);
-                                user_authenticated = p == &auth_request_password;
+                                println!("Ratchet XXX: Attempting to compare {} to {}", p, auth_request_password);
+                                user_authenticated = bcrypt::verify(&*auth_request_password, p);
+                                //user_authenticated = "123456" == &auth_request_password;
                             } else {
                                 println!("Ratchet Debug: Couldn't find {:#?}, check username", username);
                                 // user who? user not authenticated!
@@ -410,14 +417,14 @@ pub fn main() {
         
                             if user_authenticated {
                                 match authen_sess.send_final_packet(&mut stream, RTAuthenReplyPacket::get_success_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent success packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent success packet"),
+                                    Err(e) => (),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
 
                             } else {
                                 match authen_sess.send_final_packet(&mut stream,  RTAuthenReplyPacket::get_fail_packet()) {
-                                    Ok(_) => println!("Ratchet Debug: Sent failure packet"),
-                                    Err(e) => println!("Ratchet Error: TCP Error, {}", e),
+                                    Ok(_) => (),//println!("Ratchet Debug: Sent failure packet"),
+                                    Err(e) => (),//println!("Ratchet Error: TCP Error, {}", e),
                                 }
                             }
                         },
@@ -457,6 +464,7 @@ pub fn main() {
             },
         }
         });
+        // benchmarking
         // let end_time = Instant::now();
         // unsafe {RUNNING_AVG = RUNNING_AVG + ((end_time - start_time)).as_secs_f64();}
     }
@@ -531,6 +539,10 @@ fn rt_fetch_secret<'a>(ip: &IpAddr, clients_v4: &'a [HashMap<u32, String>; 33] ,
 /// 
 /// Install the CSV list of clients as the users database.
 /// 
+/// Explicitly reject users configured with plaintext passwords; 
+/// the password has to look like a '2b' formatted bcrypt password hash.
+/// see crypt(5) for more flavor text.
+/// 
 fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i18n: bool) {
     // Otherwise use rt_server_read_creds to obtain credentials
     let output = Command::new("sh")
@@ -545,6 +557,7 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
     for line in data_str.lines() {
         // Split each line by comma
         let parts: Vec<&str> = line.split(',').collect();
+
         let username_case_preserved : UsernameCasePreserved = UsernameCasePreserved::new();
 
         // Ensure there are exactly two parts to form a key-value pair
@@ -568,9 +581,48 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
             
             println!("Ratchet Debug: Installed user {}", username);
             let value = parts[1].to_string();
-            creds_out.insert(username, value);
+            
+            if rt_validate_hash(&value) {
+                creds_out.insert(username, value);
+            } else {
+                println!("Ratchet Warning: Passwords must be valid '2b' Bcrypt hashes, around {}", parts[0]);
+                continue;
+            }
+        } else {
+            println!("Ratchet Warning: Invalid username passed around {}", parts[0]);
+            continue;
         }
     }
+}
+
+fn rt_validate_hash(hash_tested: &String) -> bool {
+                                        // splitting implies a single blank substring, first
+    hash_tested.split_terminator('$').skip(1).enumerate().all(
+        |(idx, next)| {
+            println!("Ratchet Debug: Validating hash with {idx} predicate and {next}");
+            match idx {
+                // Bcrypt variant identity
+                0 => next == "2b",
+                // cost / rounds
+                1 => next.len() == 2 && match next.parse::<u8>() { 
+                                            Ok(val) => val >= 4 && val <= 31, 
+                                            Err(_) => false,
+                                        },
+                // Base64 salt / checksum -- see man 5 crypt for format spec...; not the base64 rfc
+                2 => next.len() == 53 && match next.find(|c| !(c >= 'A' && c <= 'Z'
+                                                            || c >= 'a' && c <= 'z'
+                                                            || c >= '0' && c <= '9'
+                                                            || c == '.' || c == '/')) {
+                                                                Some(weird_char) => {
+                                                                    println!("Ratchet Debug: I have an issue with: {:?}", weird_char);
+                                                                    false
+                                                                },
+                                                                None => true,
+                                                            },
+                _ => false,
+            }
+        }
+    )
 }
 
 /// For a user-specified shell command string,
@@ -673,13 +725,14 @@ fn rt_obtain_clients(cmd: &str, v4_clients_out: &mut [HashMap<u32, String>; 33],
     }
 }
 
-unsafe fn rt_get_avg() -> f64{
-    return RUNNING_AVG;
-}
-
-unsafe fn rt_get_runs() -> f64 {
-    return RUNS;
-}
+// benchmarking
+// unsafe fn rt_get_avg() -> f64{
+//     return RUNNING_AVG;
+// }
+//
+// unsafe fn rt_get_runs() -> f64 {
+//     return RUNS;
+// }
 
 fn rt_get_user_name() -> String {
     return match if cfg!(target_os = "windows") {
@@ -696,7 +749,7 @@ fn rt_get_user_name() -> String {
             return "Couldn't get username".to_string();
         }
     };
-} 
+}
 
 macro_rules! generate_v6netmasks {
     // Macro for generating netmasks for IPv4 and IPv6
