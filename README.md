@@ -37,11 +37,11 @@ RATCHET_READ_CLIENTS="./clients_cmd.sh" \
  RATCHET_CUST_HOSTPORT="[::]:49" \
  ./target/release/ratchet
 ```
-Where `clients_cmd`, `creds_cmd` correspond to a script that puts a comma-separated list with the following formal-looking format:
+Where `clients_cmd`, `creds_cmd` correspond to a script that puts a comma-separated list onto stdout with the following formal-looking format:
 
 `CLIENTS` := `(` `V4_CIDR_SUBNET|V6_CIDR_SUBNET` `,` `PLAINTEXT KEY` `\n` `)+`
 
-`CREDS` := `(` `COMMALESS_USERNAME` `,` `COMMALESS_PLATINTEXT_PASSWORD` `\n` `)+`
+`CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
 Don't repeat keys (i.e., subnets, usernames), sorry.
 
