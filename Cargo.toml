@@ -26,6 +26,7 @@ precis-profiles = "0.1.11"
 ctrlc = "3.4.5"
 libc = "0.2"
 pwhash = "1.0.0"
+tokio = { version = "1.42.0", features = ["full"] }
 
 [lints.rust]
 non_camel_case_types = "allow"

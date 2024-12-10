@@ -5,11 +5,15 @@ use std::process::{Command, Stdio};
 #[test]
 fn end_to_end_test_ascii_authentication() {
     println!("{}", cfg!(debug_assertions));
-    let argslist = 
-    if cfg!(debug_assertions) {
+    let argslist = if cfg!(debug_assertions) {
         vec!["run", "--", "--add-insecure-test-credential-do-not-use"]
     } else {
-        vec!["run", "--release", "--", "--add-insecure-test-credential-do-not-use"]
+        vec![
+            "run",
+            "--release",
+            "--",
+            "--add-insecure-test-credential-do-not-use",
+        ]
     };
 
     // Start the server
@@ -19,41 +23,42 @@ fn end_to_end_test_ascii_authentication() {
         .spawn()
         .expect("Failed to start ratchet application");
 
-        let stdout = child.stdout.as_mut().expect("Failed to open stdout");
-        let reader = BufReader::new(stdout);
-        
-        // Loop to read output until "NOWLISTENING" appears
-        let mut now_listening = false;
-        
-        for line in reader.lines() {
-            match line {
-                Ok(output) => {
-                    println!("{}", output);
-                    if output.contains("NOWLISTENING") {
-                        now_listening = true;
-                        break; // Exit loop once we find "NOWLISTENING"
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Error reading line: {}", e);
-                    break; // Exit loop on read error
-                },
+    let stdout = child.stdout.as_mut().expect("Failed to open stdout");
+    let reader = BufReader::new(stdout);
+
+    // Loop to read output until "NOWLISTENING" appears
+    let mut now_listening = false;
+
+    for line in reader.lines() {
+        match line {
+            Ok(output) => {
+                println!("{}", output);
+                if output.contains("NOWLISTENING") {
+                    now_listening = true;
+                    break; // Exit loop once we find "NOWLISTENING"
+                }
+            }
+            Err(e) => {
+                eprintln!("Error reading line: {}", e);
+                break; // Exit loop on read error
             }
         }
+    }
 
     match child.try_wait() {
         Ok(Some(status)) => {
             println!("Exited with {status}");
             assert!(false, "Server closed unexpectedly! {status}");
-        },
+        }
         Err(e) => {
             println!("Exited with {e}");
             assert!(false, "Server closed unexpectedly! {e}");
-        },
-        Ok(None) => {if now_listening {
-            println!("Server is now listening.");
+        }
+        Ok(None) => {
+            if now_listening {
+                println!("Server is now listening.");
             } // this is fine
-        },
+        }
     }
 
     // Infer location of testing script
@@ -72,18 +77,26 @@ fn end_to_end_test_ascii_authentication() {
     // Check if "Success!" is in the output
     if !stdout.contains("Success!") {
         // If not, assert false to indicate the test has failed
-        let _ = child.kill().expect("Failed to kill the ratchet application");
-        
-        let mut server_msg= String::new();
+        let _ = child
+            .kill()
+            .expect("Failed to kill the ratchet application");
+
+        let mut server_msg = String::new();
         match child.stdout.take().unwrap().read_to_string(&mut server_msg){
             Ok(_) => (),
             Err(e) => assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output: none available\n", stdout, stderr),
         }
-        assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output {}\n", stdout, stderr, server_msg);
+        assert!(
+            false,
+            "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output {}\n",
+            stdout, stderr, server_msg
+        );
     }
 
     // Kill the server
-    let _ = child.kill().expect("Failed to kill the ratchet application");
+    let _ = child
+        .kill()
+        .expect("Failed to kill the ratchet application");
 
     // Optionally, you could check if the process was killed successfully
     // and/or check its output here.
