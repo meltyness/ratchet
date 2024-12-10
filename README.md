@@ -56,26 +56,26 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 ## Future plans
 - [ ] beautiful front-end  
 - [ ] Logging
-- [ ] Config interfaces
-  - [ ] Make sure that the CSV escaping makes sense, maybe switch to TSV
 
 ### Later
+- [ ] CRUD config changes (currently will necessitate brief server relaunch)
 - [ ] Containerized distribution
-- [ ] Benchmarks / 
-- [ ] Rest of the protocol / MSCHAPv2
+- [ ] Benchmarks / Higher-order integration testing
+- [ ] Rest of the protocol /
+  - [ ] ... CHAP / MSCHAPv2
+  - [ ] ... single connection mode
 - [ ] Support for complete set of security controls
   - [ ] ... and automated auditing
   - [ ] ... and 8907 future recs
-  - [ ] ... and authenticating against unrecoverable passwords
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
-- [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
-- [ ] CRUD config changes (currently will necessitate brief server relaunch)
-- [ ] Something to meaningfully improve using GNS3 to run tests over this
-  - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
 ### Done
+
+  - [x] ... and authenticating against unrecoverable passwords
 - [x] assess or implement async to retain maximum performance
+- [x] Config interfaces
   - [x] Support for shadowed passwords instead of,... that.
+  - [x] Make sure that the CSV escaping makes sense, maybe switch to TSV
 - [x] Multi-threaded implementation
   - [x] the ASCII protocol couples too tightly, yikes!
 - [x] ASCII Authentication
@@ -83,6 +83,11 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
   - [x] Configurable user list
   - [x] Configurable clients list
   - [x] Configurable port
+
+### Maybe not ...
+- [ ] Constructively walk through LLVM opt flag configurations 'rustc passes'
+- [ ] Something to meaningfully improve using GNS3 to run tests over this
+  - [ ] ... or maybe setup like a dynaMIPS thing some way how
 
 ## Kernel Hacking / Optimization
 I discovered that when using `perf` to profile `ratchet` that the pipeline was 30% faster, which was,... odd.
