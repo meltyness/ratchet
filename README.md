@@ -56,6 +56,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 ## Future plans
 - [ ] beautiful front-end  
 - [ ] Logging
+- [ ] Correct, complete memory-hardening
 
 ### Later
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
