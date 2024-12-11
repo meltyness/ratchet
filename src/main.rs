@@ -6,7 +6,12 @@
 // (C) 2024 - T.J. Hampton
 //
 
-use libc::{mlockall, MCL_CURRENT};
+//use flex_alloc_secure::alloc::SecureAlloc;
+use flex_alloc_secure::boxed::ProtectedBox;
+use flex_alloc_secure::vec::SecureVec;
+use flex_alloc_secure::ExposeProtected;
+use libc::{mlockall, munlockall, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT};
+use core::str;
 use std::array;
 use std::collections::HashMap;
 use std::env;
@@ -71,12 +76,20 @@ struct RTKnownClient {}
 
 pub fn main() {
     println!("Ratchet Info: starting...");
+    let result = unsafe { mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) };
+    if result != 0 {
+        eprintln!("Ratchet Error: mlockall failed with error code: {}", result);
+        exit(0);
+    } else {
+        println!("Ratchet Info: mlockall succeeded");
+    }
+
     let mut server_settings = RTServerSettings::new(65535, true, "cat /dev/null", "cat /dev/null");
 
     // Create a new HashMap
     let mut credentials: HashMap<String, String> = HashMap::new();
-    let mut clients_v4: [HashMap<u32, String>; 33] = array::from_fn(|_| HashMap::new());
-    let mut clients_v6: [HashMap<u128, String>; 129] = array::from_fn(|_| HashMap::new());
+    let mut clients_v4: [HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33] = array::from_fn(|_| HashMap::new());
+    let mut clients_v6: [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129] = array::from_fn(|_| HashMap::new());
 
     let mut custom_clients_cmd = String::new();
     let mut custom_creds_cmd = String::new(); // Use String instead of &str
@@ -153,12 +166,13 @@ pub fn main() {
         server_settings.rt_server_i18n = false;
     }
 
-    let result = unsafe { mlockall(MCL_CURRENT) };
+    // FUTURE/ONFAULT substantially harm performance, flex-alloc / mlock libary obviates need
+    let result = unsafe { munlockall() | mlockall(MCL_CURRENT) };
     if result != 0 {
-        eprintln!("Ratchet Error: mlockall failed with error code: {}", result);
+        eprintln!("Ratchet Error: munlockall failed with error code: {}", result);
         exit(0);
     } else {
-        println!("Ratchet Info: mlockall succeeded");
+        println!("Ratchet Info: munlockall succeeded");
     }
 
     tokio::runtime::Builder::new_multi_thread()
@@ -176,8 +190,8 @@ pub fn main() {
 ///
 async fn tokio_main(custom_hostport: String, 
                     credentials: HashMap<String, String>,
-                    clients_v4:[HashMap<u32, String>; 33],
-                    clients_v6:[HashMap<u128, String>; 129],
+                    clients_v4:[HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33],
+                    clients_v6:[HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
                     server_settings: RTServerSettings<'_> ) {
     let listener = match TcpListener::bind(custom_hostport.as_str()).await {
         Ok(l) => l,
@@ -255,14 +269,23 @@ async fn tokio_main(custom_hostport: String,
                 &v4_binding,
                 &v6_binding,
             ) {
-                Ok(s) => s,
+                Ok(s) => {
+                    println!("Ratchet Debug: Again found client, OK {:?}", s);
+                    s
+                },
                 Err(e) => {
                     println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
                     return;
-                }
-            };
+                },
+            }; 
+            
+            let mut secret_is_blank = true;
 
-            if SECRET_KEY == "" {
+            SECRET_KEY.expose_read(|thing| {
+                secret_is_blank = thing.len() == 0
+            });
+
+            if secret_is_blank {
                 println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
                 return;
             }
@@ -567,9 +590,9 @@ async fn tokio_main(custom_hostport: String,
 
 fn rt_fetch_secret<'a>(
     ip: &IpAddr,
-    clients_v4: &'a [HashMap<u32, String>; 33],
-    clients_v6: &'a [HashMap<u128, String>; 129],
-) -> Result<&'a String, &'a str> {
+    clients_v4: &'a [HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33],
+    clients_v6: &'a [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
+) -> Result<&'a ProtectedBox<SecureVec<u8>>, &'a str> {
     println!("Ratchet Debug: Thumbing through {:#?} and {:#?}",clients_v4, clients_v6);
     match ip {
         std::net::IpAddr::V4(ipv4_addr) => {
@@ -581,6 +604,7 @@ fn rt_fetch_secret<'a>(
                 println!("Ratchet Debug: Masking result: {}", (addr & mask));
                 match clients_v4[32 - i].get(&(addr & mask)) {
                     Some(str) => {
+                        println!("Ratchet Debug: Found with {:?}", str);
                         return Ok(str);
                     }
                     None => (),
@@ -600,6 +624,7 @@ fn rt_fetch_secret<'a>(
                     println!("Ratchet Debug: Masking result: {}", (addr & mask));
                     match clients_v4[32 - i].get(&(addr & mask)) {
                         Some(str) => {
+                            println!("Ratchet Debug: Found with {:?}", str);
                             return Ok(str);
                         }
                         None => (),
@@ -650,7 +675,9 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
     let data_str = String::from_utf8_lossy(&output.stdout);
 
     // Split by newline
+    let mut line_ct = -1;
     for line in data_str.lines() {
+        line_ct += 1;
         // Split each line by comma
         let parts: Vec<&str> = line.split(',').collect();
 
@@ -667,7 +694,7 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
                         fixed_username.to_string()
                     }
                     Err(e) => {
-                        println!("Ratchet Error: Invalid username passed, {}", e);
+                        println!("Ratchet Error: Invalid username passed around line, {}", line_ct);
                         continue;
                     }
                 }
@@ -681,11 +708,11 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
             if rt_validate_hash(&value) {
                 creds_out.insert(username, value);
             } else {
-                println!("Ratchet Warning: Passwords must be valid '2b' Bcrypt hashes, around {}",parts[0]);
+                println!("Ratchet Warning: Passwords must be valid '2b' Bcrypt hashes, around line {}",line_ct);
                 continue;
             }
         } else {
-            println!("Ratchet Warning: Invalid username passed around {}",parts[0]);
+            println!("Ratchet Warning: Invalid username passed around line {}", line_ct);
             continue;
         }
     }
@@ -752,8 +779,8 @@ fn rt_validate_hash(hash_tested: &String) -> bool {
 ///
 fn rt_obtain_clients(
     cmd: &str,
-    v4_clients_out: &mut [HashMap<u32, String>; 33],
-    v6_clients_out: &mut [HashMap<u128, String>; 129],
+    v4_clients_out: &mut [HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33],
+    v6_clients_out: &mut [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
 ) {
     // Otherwise use rt_server_read_creds to obtain credentials
     let output = Command::new("sh")
@@ -768,17 +795,15 @@ fn rt_obtain_clients(
     for line in data_str.lines() {
         // Split each line by comma
         let parts: Vec<&str> = line.split(',').collect();
-        let username_case_preserved: UsernameCasePreserved = UsernameCasePreserved::new();
 
         // Ensure there are exactly two parts to form a key-value pair
         if parts.len() == 2 {
             let key = parts[0].trim().to_string();
-            let value = parts[1].to_string(); // keys can contain spaces in some implementations
-
-            if value.len() == 0 || key.len() == 0 {
+            if parts[1].len() == 0 || key.len() == 0 {
                 println!("Ratchet Error: Must have valid network and secret, skipping {}",key);
                 continue;
             }
+            let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
 
             let key_parts: Vec<&str> = key.split('/').collect();
 
@@ -835,7 +860,11 @@ fn rt_obtain_clients(
             };
 
             println!("Ratchet Debug: Installed client {}", key);
+        } else {
+            println!("Ratchet Warning: Invalid username passed around {}",parts[0]);
+            continue;
         }
+
     }
 }
 

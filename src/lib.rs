@@ -9,6 +9,7 @@
 //use std::{fmt, io::Read, io::Write, net::TcpStream};
 
 use std::fmt;
+use flex_alloc_secure::{alloc::SecureAlloc, boxed::ProtectedBox, flex_alloc, ExposeProtected};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -69,7 +70,7 @@ impl RTHeader {
         result.extend(&self.tacp_hdr_sesid.to_be_bytes());
         result.extend(&self.tacp_hdr_length.to_be_bytes());
 
-        //println!("Ratchet Debug: Serialized header to {:#?}", result);
+        println!("Ratchet Debug: Serialized header to {:#?}", result);
 
         result
     }
@@ -121,14 +122,14 @@ impl RTHeader {
     ///
     pub async fn parse_init_header(stream: &mut TcpStream, cur_seq: u8) -> Result<Self, &str> {
         let mut hdr_buf: [u8; TACP_HEADER_MAX_LENGTH] = [0u8; TACP_HEADER_MAX_LENGTH];
-        //println!("Ratchet Debug: Reading {} off the line", cur_seq);
+        println!("Ratchet Debug: Reading {} off the line", cur_seq);
         let exp_seq = cur_seq + 1;
         // TODO: this blocks.
 
         match stream.read_exact(&mut hdr_buf).await {
             Ok(_) => (),
             Err(e) => {
-                //println!("Ratchet Error: TCP Error from subsystem: {}", e);
+                println!("Ratchet Error: TCP Error from subsystem: {}", e);
                 return Err("Segment too short, check client implementation.");
             }
         }
@@ -155,7 +156,7 @@ impl RTHeader {
             return Err("Client wants to send unreasonably large password or something");
         }
 
-        //println!("Ratchet Debug: Parsed header: {:#?}", ret);
+        println!("Ratchet Debug: Parsed header: {:#?}", ret);
         Ok(ret)
     }
 
@@ -167,7 +168,7 @@ impl RTHeader {
     pub async fn parse_authen_packet(
         &self,
         stream: &mut TcpStream,
-        key: &str,
+        key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
     ) -> Result<RTDecodedPacket, &str> {
         let md5pad = self.compute_md5_pad(key);
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
@@ -175,12 +176,12 @@ impl RTHeader {
         match stream.read_exact(&mut pck_buf).await {
             Ok(_) => (),
             Err(e) => {
-                //println!("Ratchet Error: TCP Error from subsystem: {}", e);
+                println!("Ratchet Error: TCP Error from subsystem: {}", e);
                 return Err("Segment too short, check client implementation.");
             }
         }
 
-        ////println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
+        println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
 
         let pck_buf = md5_xor(&pck_buf, &md5pad);
 
@@ -189,13 +190,13 @@ impl RTHeader {
                 RTAuthenPacket::RTAuthenStartPacket(r),
             )),
             Err(e) => {
-                //println!("Ratchet Debug: Packet was not Start packet, trying Continue packet");
+                println!("Ratchet Debug: Packet was not Start packet, trying Continue packet");
                 match RTAuthenContinuePacket::from_raw_packet(&pck_buf) {
                     Ok(r) => Ok(RTDecodedPacket::RTAuthenPacket(
                         RTAuthenPacket::RTAuthenContinuePacket(r),
                     )),
                     Err(e) => {
-                        //println!("Ratchet Error: Invalid packet field processed {}", e);
+                        println!("Ratchet Error: Invalid packet field processed {}", e);
                         return Err("Packet field error in authentication.");
                     }
                 }
@@ -207,31 +208,35 @@ impl RTHeader {
     ///
     /// This seems to work for the implementations checked.
     ///
-    pub fn compute_md5_pad(&self, key: &str) -> Vec<u8> {
+    pub fn compute_md5_pad(&self, key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Vec<u8> {
         let payload_length = self.get_expected_packet_length();
         let mut md5ctx = md5::Context::new();
-        md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-        md5ctx.consume(key);
-        md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
-        md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
-
-        let mut md5pad = md5ctx.compute().to_vec();
-        let mut md5last: Vec<u8> = vec![];
-        md5pad.clone_into(&mut md5last);
-
-        while md5pad.len() < payload_length {
-            let mut md5ctx = md5::Context::new();
+        let mut md5pad = vec![];
+        let mut md5last = vec![];
+        key.expose_read( |inner_key| {
             md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-            md5ctx.consume(key);
+            md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
             md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
             md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
-            md5ctx.consume(md5last.clone());
 
-            md5last = md5ctx.compute().to_vec();
-            md5pad.extend(&md5last);
-        }
+            md5pad = md5ctx.compute().to_vec();
+            md5last = vec![];
+            md5pad.clone_into(&mut md5last);
 
-        md5pad.truncate(payload_length);
+            while md5pad.len() < payload_length {
+                let mut md5ctx = md5::Context::new();
+                md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
+                md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
+                md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
+                md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
+                md5ctx.consume(md5last.clone());
+
+                md5last = md5ctx.compute().to_vec();
+                md5pad.extend(&md5last);
+            }
+
+            md5pad.truncate(payload_length);
+        });
 
         md5pad
     }
@@ -375,7 +380,7 @@ const RT_AUTH_TEXT_START: usize = RT_AUTHENTICATION_START_PACKET_INDEXES.data_le
 impl RTAuthenStartPacket {
     #[allow(clippy::indexing_slicing)]
     pub fn from_raw_packet(pck_buf: &[u8]) -> Result<Self, &str> {
-        ////println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
+        println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
 
         // it seems risky to have the protocol do this unchecked.
         if pck_buf.len() < 8 {
@@ -389,7 +394,7 @@ impl RTAuthenStartPacket {
             + 8;
         let expected_size = pck_buf.len();
         if purported_size != expected_size {
-            ////println!("Malformed packet size! {} {}", purported_size, expected_size);
+            println!("Malformed packet size! {} {}", purported_size, expected_size);
             return Err("Malformed packet size (doesn't add up)");
         }
 
@@ -668,7 +673,7 @@ const RT_CONT_TEXT_START: usize = RT_AUTHENTICATION_CONT_PACKET_INDEXES.flags + 
 
 impl RTAuthenContinuePacket {
     pub fn from_raw_packet(pck_buf: &[u8]) -> Result<Self, &str> {
-        //println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
+        println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
 
         // it seems risky to have the protocol do this unchecked.
         if pck_buf.len() < 5 {
@@ -689,7 +694,7 @@ impl RTAuthenContinuePacket {
         let expected_size = pck_buf.len();
 
         if purported_size != expected_size {
-            //println!("Malformed packet size! {} {}", purported_size, expected_size);
+            println!("Malformed packet size! {} {}", purported_size, expected_size);
             return Err("Malformed packet size (doesn't add up)");
         }
 
@@ -741,11 +746,11 @@ pub struct RTAuthenSess<'a> {
     rt_curr_seqno: u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
     rt_my_sessid: u32,
     rt_my_version: u8,
-    rt_key: &'a str,
+    rt_key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
 }
 
 impl<'a> RTAuthenSess<'a> {
-    pub fn from_header(r: &RTHeader, key: &'a str) -> Self {
+    pub fn from_header(r: &RTHeader, key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Self {
         Self {
             rt_curr_seqno: r.tacp_hdr_seqno,
             rt_my_sessid: r.tacp_hdr_sesid,
@@ -772,21 +777,21 @@ impl<'a> RTAuthenSess<'a> {
         //   ... maybe the 'outermost' detail needed is the session info (i.e., expected pack number, expected sesid), so
         //   ... it should be a part of a session implementation for the full transaction.
         let user_resp_hdr = self.next_header(&get_user_packet);
-        //println!("Ratchet Debug: {:#?}", user_resp_hdr);
-        //println!("Ratchet Debug: {:#?}", get_user_packet);
+        println!("Ratchet Debug: {:#?}", user_resp_hdr);
+        println!("Ratchet Debug: {:#?}", get_user_packet);
         let pad = user_resp_hdr.compute_md5_pad(self.rt_key);
         let mut payload = md5_xor(&get_user_packet.serialize(), &pad);
         let mut msg = user_resp_hdr.serialize();
         msg.append(&mut payload);
 
-        //println!("{:?}", msg);
+        println!("{:?}", msg);
         // TODO: This blocks
         match stream.write(&msg).await {
             Ok(v) => {
                 if self.inc_seqno().is_err() {
                     return Err("Wrapped sequence number, restart single-session");
                 }
-                //println!("Ratchet Debug: Sent {} bytes", v)
+                println!("Ratchet Debug: Sent {} bytes", v)
             }
             Err(e) => (),
             //println!("Ratchet Error: TCP Error, {}", e),
@@ -797,14 +802,14 @@ impl<'a> RTAuthenSess<'a> {
         let user_hdr: RTHeader =
             match RTHeader::parse_init_header(&mut stream, self.rt_curr_seqno).await {
                 Ok(h) => {
-                    ////println!("Ratchet Debug: Processed {:#?}", h);
+                    println!("Ratchet Debug: Processed {:#?}", h);
                     if self.inc_seqno().is_err() {
                         return Err("Wrapped sequence number, restart single-session");
                     }
                     h
                 }
                 Err(e) => {
-                    //println!("Ratchet Error: {}", e);
+                    println!("Ratchet Error: {}", e);
                     self.send_error_packet(&mut stream).await;
                     return Err("Bad header from client");
                 }
@@ -815,12 +820,12 @@ impl<'a> RTAuthenSess<'a> {
                 user_hdr.parse_authen_packet(&mut stream, self.rt_key).await
             }
             RTTACType::TAC_PLUS_AUTHOR => {
-                //println!("Ratchet Debug: Not Implemented");
+                println!("Ratchet Debug: Not Implemented");
                 self.send_error_packet(&mut stream).await;
                 return Err("Unexpected Authorization reply from client");
             }
             RTTACType::TAC_PLUS_ACCT => {
-                //println!("Ratchet Debug: Not Implemented");
+                println!("Ratchet Debug: Not Implemented");
                 self.send_error_packet(&mut stream).await;
                 return Err("Unexpected Accounting reply from client");
             }
@@ -828,35 +833,35 @@ impl<'a> RTAuthenSess<'a> {
 
         let decoded_user: RTDecodedPacket = match user_contents {
             Err(e) => {
-                //println!("Ratchet Error: {}", e);
+                println!("Ratchet Error: {}", e);
                 self.send_error_packet(&mut stream).await;
                 return Err("Invalid data passed in GetUser body");
             }
             Ok(d) => {
-                ////println!("Ratchet Debug: Processed {:#?}", d);
+                println!("Ratchet Debug: Processed {:#?}", d);
                 d
             }
         };
 
-        //println!("Ratchet Debug: Deciding on decoded user packet");
+        println!("Ratchet Debug: Deciding on decoded user packet");
         match decoded_user {
             RTDecodedPacket::RTAuthenPacket(rtauthen_user_packet) => {
-                //println!("Ratchet Debug: Was authen packet, checking for Continue");
+                println!("Ratchet Debug: Was authen packet, checking for Continue");
                 match rtauthen_user_packet {
                     RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => Ok(
                         String::from_utf8_lossy(&rtauthen_continue_packet.user_msg.clone())
                             .to_string(),
                     ),
                     _ => {
-                        //println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence");
+                        println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence");
                         self.send_error_packet(&mut stream).await;
                         return Err("Invalid data passed in GetUser body");
                     }
                 }
             }
             _ => {
-                //println!("Ratchet Error: Non authen packet in Authen sequence");
-                //println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence");
+                println!("Ratchet Error: Non authen packet in Authen sequence");
+                println!("Ratchet Error: Unexpected packet type in ASCII Authentication sequence");
                 self.send_error_packet(&mut stream).await;
                 return Err("Invalid data passed in GetUser body");
             }
@@ -877,14 +882,14 @@ impl<'a> RTAuthenSess<'a> {
         // It's just a header, it shouldn't reveal anything interesting.
         match stream.write(&msg).await {
             Ok(v) => {
-                //println!("Ratchet Debug: Sent {} bytes", v);
+                println!("Ratchet Debug: Sent {} bytes", v);
                 if self.inc_seqno().is_err() {
                     return Err("Wrapped sequence number, restart single-session");
                 }
                 Ok(true)
             }
             Err(e) => {
-                //println!("Ratchet Error: TCP Error, {}", e);
+                println!("Ratchet Error: TCP Error, {}", e);
                 Err("Bad TCP Session")
             }
         }
@@ -901,14 +906,14 @@ impl<'a> RTAuthenSess<'a> {
         // It's just a header, it shouldn't reveal anything interesting.
         match stream.write(&msg).await {
             Ok(v) => {
-                //println!("Ratchet Debug: Sent {} bytes", v);
+                println!("Ratchet Debug: Sent {} bytes", v);
                 if self.inc_seqno().is_err() {
                     return false;
                 }
                 true
             }
             Err(e) => {
-                //println!("Ratchet Error: TCP Error, {}", e);
+                println!("Ratchet Error: TCP Error, {}", e);
                 false
             }
         }
