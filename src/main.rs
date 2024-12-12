@@ -11,7 +11,6 @@ use flex_alloc_secure::alloc::SecureAlloc;
 use flex_alloc_secure::boxed::ProtectedBox;
 use flex_alloc_secure::vec::SecureVec;
 use flex_alloc_secure::ExposeProtected;
-use libc::{mlockall, munlockall, MCL_CURRENT, MCL_FUTURE, MCL_ONFAULT};
 use core::str;
 use std::array;
 use std::collections::HashMap;
@@ -79,13 +78,6 @@ struct RTKnownClient {}
 
 pub fn main() {
     println!("Ratchet Info: starting...");
-    let result = unsafe { mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) };
-    if result != 0 {
-        eprintln!("Ratchet Error: mlockall failed with error code: {}", result);
-        exit(0);
-    } else {
-        println!("Ratchet Info: mlockall succeeded");
-    }
 
     let mut server_settings = RTServerSettings::new(65535, true, "cat /dev/null", "cat /dev/null");
 
@@ -167,15 +159,6 @@ pub fn main() {
 
     if env::args().any(|x| x == *"--ignore-i18n".to_string()) {
         server_settings.rt_server_i18n = false;
-    }
-
-    // FUTURE/ONFAULT substantially harm performance, flex-alloc / mlock libary obviates need
-    let result = unsafe { munlockall() | mlockall(MCL_CURRENT) };
-    if result != 0 {
-        eprintln!("Ratchet Error: munlockall failed with error code: {}", result);
-        exit(0);
-    } else {
-        println!("Ratchet Info: munlockall succeeded");
     }
 
     tokio::runtime::Builder::new_multi_thread()
