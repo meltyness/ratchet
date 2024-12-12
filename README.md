@@ -56,7 +56,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 ## Future plans
 - [ ] beautiful front-end  
 - [ ] Logging
-- [ ] Correct, complete memory-hardening
+- [ ] authorization
 
 ### Later
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
@@ -69,9 +69,12 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
   - [ ] ... and automated auditing
   - [ ] ... and 8907 future recs
 - [ ] fail2ban-like mechanism to protect server from misbehaving clients
+- [ ] argonaut / argon for password hashing
+- [ ] assess md5 performance / simd?
 
 ### Done
 
+- [x] complete memory-hardening
   - [x] ... and authenticating against unrecoverable passwords
 - [x] assess or implement async to retain maximum performance
 - [x] Config interfaces
