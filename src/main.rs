@@ -6,6 +6,7 @@
 // (C) 2024 - T.J. Hampton
 //
 
+use flex_alloc_secure::alloc::SecureAlloc;
 //use flex_alloc_secure::alloc::SecureAlloc;
 use flex_alloc_secure::boxed::ProtectedBox;
 use flex_alloc_secure::vec::SecureVec;
@@ -15,10 +16,12 @@ use core::str;
 use std::array;
 use std::collections::HashMap;
 use std::env;
+use std::io::Read;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 use tokio::time::timeout;
 //use std::net::TcpListener;
@@ -783,18 +786,35 @@ fn rt_obtain_clients(
     v6_clients_out: &mut [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
 ) {
     // Otherwise use rt_server_read_creds to obtain credentials
-    let output = Command::new("sh")
+    let mut output = Command::new("sh")
         .arg("-c")
         .arg(cmd)
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .expect("Failed to execute configured command.");
 
-    let data_str = String::from_utf8_lossy(&output.stdout);
+    output.wait().expect("Client creds command failed");
+    
+    let data_str = 
+    SecureVec::from_iter_in(output.stdout.take()
+                                            .unwrap()
+                                            .bytes()
+                                            .map(
+                                            |garbage| 
+                                            match garbage
+                                            { 
+                                                Ok(bytes) => bytes,
+                                                _ => 0,
+                                            }) , SecureAlloc);
 
+    
     // Split by newline
-    for line in data_str.lines() {
+    for line in data_str.split(|c| *c == b'\n') {
         // Split each line by comma
-        let parts: Vec<&str> = line.split(',').collect();
+        let parts: Vec<&str> = line.split(|c| *c == b',')
+                                    .map(|u| 
+                                        str::from_utf8(u).unwrap_or(&"")
+                                    ).collect();
 
         // Ensure there are exactly two parts to form a key-value pair
         if parts.len() == 2 {
