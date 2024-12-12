@@ -9,6 +9,7 @@
 //use std::{fmt, io::Read, io::Write, net::TcpStream};
 
 use std::fmt;
+use flex_alloc_secure::{alloc::SecureAlloc, boxed::ProtectedBox, flex_alloc, ExposeProtected};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -167,7 +168,7 @@ impl RTHeader {
     pub async fn parse_authen_packet(
         &self,
         stream: &mut TcpStream,
-        key: &str,
+        key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
     ) -> Result<RTDecodedPacket, &str> {
         let md5pad = self.compute_md5_pad(key);
         let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
@@ -180,7 +181,7 @@ impl RTHeader {
             }
         }
 
-        ////println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
+        //println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
 
         let pck_buf = md5_xor(&pck_buf, &md5pad);
 
@@ -188,7 +189,7 @@ impl RTHeader {
             Ok(r) => Ok(RTDecodedPacket::RTAuthenPacket(
                 RTAuthenPacket::RTAuthenStartPacket(r),
             )),
-            Err(e) => {
+            Err(e) => { // TODO: Result<Option...? hm.
                 //println!("Ratchet Debug: Packet was not Start packet, trying Continue packet");
                 match RTAuthenContinuePacket::from_raw_packet(&pck_buf) {
                     Ok(r) => Ok(RTDecodedPacket::RTAuthenPacket(
@@ -207,31 +208,35 @@ impl RTHeader {
     ///
     /// This seems to work for the implementations checked.
     ///
-    pub fn compute_md5_pad(&self, key: &str) -> Vec<u8> {
+    pub fn compute_md5_pad(&self, key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Vec<u8> {
         let payload_length = self.get_expected_packet_length();
         let mut md5ctx = md5::Context::new();
-        md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-        md5ctx.consume(key);
-        md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
-        md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
-
-        let mut md5pad = md5ctx.compute().to_vec();
-        let mut md5last: Vec<u8> = vec![];
-        md5pad.clone_into(&mut md5last);
-
-        while md5pad.len() < payload_length {
-            let mut md5ctx = md5::Context::new();
+        let mut md5pad = vec![];
+        let mut md5last = vec![];
+        key.expose_read( |inner_key| {
             md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-            md5ctx.consume(key);
+            md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
             md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
             md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
-            md5ctx.consume(md5last.clone());
 
-            md5last = md5ctx.compute().to_vec();
-            md5pad.extend(&md5last);
-        }
+            md5pad = md5ctx.compute().to_vec();
+            md5last = vec![];
+            md5pad.clone_into(&mut md5last);
 
-        md5pad.truncate(payload_length);
+            while md5pad.len() < payload_length {
+                let mut md5ctx = md5::Context::new();
+                md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
+                md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
+                md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
+                md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
+                md5ctx.consume(md5last.clone());
+
+                md5last = md5ctx.compute().to_vec();
+                md5pad.extend(&md5last);
+            }
+
+            md5pad.truncate(payload_length);
+        });
 
         md5pad
     }
@@ -375,7 +380,7 @@ const RT_AUTH_TEXT_START: usize = RT_AUTHENTICATION_START_PACKET_INDEXES.data_le
 impl RTAuthenStartPacket {
     #[allow(clippy::indexing_slicing)]
     pub fn from_raw_packet(pck_buf: &[u8]) -> Result<Self, &str> {
-        ////println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
+        //println!("Ratchet Debug: Hey, check out this: {:#?}", String::from_utf8_lossy(pck_buf));
 
         // it seems risky to have the protocol do this unchecked.
         if pck_buf.len() < 8 {
@@ -389,7 +394,7 @@ impl RTAuthenStartPacket {
             + 8;
         let expected_size = pck_buf.len();
         if purported_size != expected_size {
-            ////println!("Malformed packet size! {} {}", purported_size, expected_size);
+            //println!("Malformed packet size! {} {}", purported_size, expected_size);
             return Err("Malformed packet size (doesn't add up)");
         }
 
@@ -741,11 +746,11 @@ pub struct RTAuthenSess<'a> {
     rt_curr_seqno: u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
     rt_my_sessid: u32,
     rt_my_version: u8,
-    rt_key: &'a str,
+    rt_key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
 }
 
 impl<'a> RTAuthenSess<'a> {
-    pub fn from_header(r: &RTHeader, key: &'a str) -> Self {
+    pub fn from_header(r: &RTHeader, key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Self {
         Self {
             rt_curr_seqno: r.tacp_hdr_seqno,
             rt_my_sessid: r.tacp_hdr_sesid,
@@ -797,7 +802,7 @@ impl<'a> RTAuthenSess<'a> {
         let user_hdr: RTHeader =
             match RTHeader::parse_init_header(&mut stream, self.rt_curr_seqno).await {
                 Ok(h) => {
-                    ////println!("Ratchet Debug: Processed {:#?}", h);
+                    //println!("Ratchet Debug: Processed {:#?}", h);
                     if self.inc_seqno().is_err() {
                         return Err("Wrapped sequence number, restart single-session");
                     }
@@ -833,7 +838,7 @@ impl<'a> RTAuthenSess<'a> {
                 return Err("Invalid data passed in GetUser body");
             }
             Ok(d) => {
-                ////println!("Ratchet Debug: Processed {:#?}", d);
+                //println!("Ratchet Debug: Processed {:#?}", d);
                 d
             }
         };

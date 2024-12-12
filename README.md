@@ -37,13 +37,13 @@ RATCHET_READ_CLIENTS="./clients_cmd.sh" \
  RATCHET_CUST_HOSTPORT="[::]:49" \
  ./target/release/ratchet
 ```
-Where `clients_cmd`, `creds_cmd` correspond to a script that puts a comma-separated list onto stdout with the following formal-looking format:
+Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encoded CSV list onto stdout with the following formal-looking line format:
 
 `CLIENTS` := `(` `V4_CIDR_SUBNET|V6_CIDR_SUBNET` `,` `PLAINTEXT KEY` `\n` `)+`
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
-Don't repeat keys (i.e., subnets, usernames), sorry.
+Don't repeat keys (i.e., specific subnets, specific usernames), sorry.
 
 If you want to do something cheeky like make `RATCHET_READ_CLIENTS="echo '10.10.2.20/32,testing123'` or `RATCHET_READ_CREDS=cat clients_lists.txt` that's fine, I'm easy.
 
