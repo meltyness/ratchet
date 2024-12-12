@@ -128,7 +128,7 @@ pub fn main() {
             "$2b$05$iE0X0t4n0Ag8pGR0o6zqn.qBZt9reoIOHAajI1NQNZOun0Mc57uuG".to_string(),
         );
         rt_obtain_clients(
-            "echo '127.0.0.1,testing123'",
+            "echo 127.0.0.1,testing123",
             &mut clients_v4,
             &mut clients_v6,
         );
@@ -138,7 +138,7 @@ pub fn main() {
     if env::args().any(|x| x == *"--add-basic-db-test-do-not-use".to_string()) {
         rt_obtain_creds("echo 'user1,extremely_secure_pass\nuser2,$2b$05$OIBXZUqfOWT2SHyShytLD.Qwk/XsBJTxFypqvKdfjE2sj5N7SDapC\nuser3,awesome_password'", &mut credentials, server_settings.rt_server_i18n);
         rt_obtain_clients(
-            "echo '127.0.0.1,testing123'",
+            "echo 127.0.0.1,testing123",
             &mut clients_v4,
             &mut clients_v6,
         );
@@ -151,7 +151,7 @@ pub fn main() {
             "$2b$05$iE0X0t4n0Ag8pGR0o6zqn.qBZt9reoIOHAajI1NQNZOun0Mc57uuG".to_string(),
         );
         rt_obtain_clients(
-            "echo '0.0.0.0/0,testing123'",
+            "echo 0.0.0.0/0,testing123",
             &mut clients_v4,
             &mut clients_v6,
         );
@@ -653,7 +653,12 @@ fn rt_fetch_secret<'a>(
 ///
 fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i18n: bool) {
     // Otherwise use rt_server_read_creds to obtain credentials
-    let output = Command::new("sh")
+    let (prog, arg1) = match cfg!(target_os = "windows") {
+        true => ("cmd", "/C"),
+        false => ("sh", "-c")
+    };
+    let output = Command::new(prog)
+        .arg(arg1)
         .arg("-c")
         .arg(cmd)
         .output()
@@ -770,8 +775,12 @@ fn rt_obtain_clients(
     v6_clients_out: &mut [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
 ) {
     // Otherwise use rt_server_read_creds to obtain credentials
-    let mut output = Command::new("sh")
-        .arg("-c")
+    let (prog, arg1) = match cfg!(target_os = "windows") {
+        true => ("cmd", "/C"),
+        false => ("sh", "-c")
+    };
+    let mut output = Command::new(prog)
+        .arg(arg1)
         .arg(cmd)
         .stdout(Stdio::piped())
         .spawn()
