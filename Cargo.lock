@@ -528,7 +528,6 @@ version = "0.1.0"
 dependencies = [
  "ctrlc",
  "flex-alloc-secure",
- "libc",
  "md5",
  "precis-profiles",
  "pwhash",
