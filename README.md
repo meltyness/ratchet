@@ -17,7 +17,11 @@ It's written in a memory-safe language, and has very few dependencies.
 ## Status
 This server implements a slim portion of the TACACS+ protocol.
 
-It's very fast and lightweight, with compiler optimization enabled, on a low-end system in a basic configuration, I've seen it service as many as 75,000 requests / sec -- even single-threaded.
+It's very fast and lightweight.
+
+Performance impact hierarchy:
+- Credential hashing / crypto
+- I/O blocking / contention
 
 ## Building / Running / Configuring
 There's no external dependencies, so you can just do
