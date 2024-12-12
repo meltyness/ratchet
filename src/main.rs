@@ -29,7 +29,7 @@ use tokio::net::TcpListener;
 
 use std::str::FromStr;
 // benchmarking
-use std::process::exit;
+//use std::process::exit;
 //use std::time::Instant;
 
 use std::sync::Arc;
@@ -250,7 +250,7 @@ async fn tokio_main(custom_hostport: String,
             // TODO: completely encapsulate this into the session eventually...
             let v4_binding = clients_v4_container.clone();
             let v6_binding = clients_v6_container.clone();
-            let SECRET_KEY = match rt_fetch_secret(
+            let session_key = match rt_fetch_secret(
                 &stream.peer_addr().unwrap().ip(),
                 &v4_binding,
                 &v6_binding,
@@ -267,7 +267,7 @@ async fn tokio_main(custom_hostport: String,
             
             let mut secret_is_blank = true;
 
-            SECRET_KEY.expose_read(|thing| {
+            session_key.expose_read(|thing| {
                 secret_is_blank = thing.len() == 0
             });
 
@@ -289,12 +289,13 @@ async fn tokio_main(custom_hostport: String,
                 }
             };
 
-            let mut authen_sess = RTAuthenSess::from_header(&hdr, SECRET_KEY);
+            let mut authen_sess = RTAuthenSess::from_header(&hdr, session_key);
 
             // Stage 2: Parse packet, perform appropriate treatment
             let contents = match hdr.tacp_hdr_type {
                 RTTACType::TAC_PLUS_AUTHEN => {
-                    hdr.parse_authen_packet(&mut stream, SECRET_KEY).await
+                    hdr.parse_authen_packet(&mut stream, session_key
+    ).await
                 }
                 RTTACType::TAC_PLUS_AUTHOR => {
                     println!("Ratchet Debug: Not Implemented");
@@ -661,7 +662,7 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
     let data_str = String::from_utf8_lossy(&output.stdout);
 
     // Split by newline
-    let mut line_ct = -1;
+    let mut line_ct = 0;
     for line in data_str.lines() {
         line_ct += 1;
         // Split each line by comma
@@ -792,12 +793,15 @@ fn rt_obtain_clients(
 
     
     // Split by newline
+    let mut line_ct = 0;
     for line in data_str.split(|c| *c == b'\n') {
+        line_ct += 1;
         // Split each line by comma
-        let parts: Vec<&str> = line.split(|c| *c == b',')
+        let parts = 
+        SecureVec::from_iter_in(line.split(|c| *c == b',')
                                     .map(|u| 
                                         str::from_utf8(u).unwrap_or(&"")
-                                    ).collect();
+                                    ), SecureAlloc);
 
         // Ensure there are exactly two parts to form a key-value pair
         if parts.len() == 2 {
@@ -806,7 +810,6 @@ fn rt_obtain_clients(
                 println!("Ratchet Error: Must have valid network and secret, skipping {}",key);
                 continue;
             }
-            let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
 
             let key_parts: Vec<&str> = key.split('/').collect();
 
@@ -816,6 +819,7 @@ fn rt_obtain_clients(
                 Ok(s) => {
                     let int_address = s.to_bits();
                     if !net_mask_def {
+                        let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                         v4_clients_out[32].insert(int_address, value);
                         continue;
                     } else {
@@ -826,6 +830,7 @@ fn rt_obtain_clients(
                         // TODO: A (probably) faster solution would be to use an immediate / left-shift
                         //       to fetch the ith mask.
                         if netmask <= 32 && (int_address == (int_address & (IPV4_MASKS[netmask]))) {
+                            let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                             v4_clients_out[netmask].insert(int_address, value);
                         } else {
                             println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}",key);
@@ -837,6 +842,7 @@ fn rt_obtain_clients(
                         Ok(s) => {
                             let int_address = s.to_bits();
                             if !net_mask_def {
+                                let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                                 v6_clients_out[128].insert(int_address, value);
                                 continue;
                             } else {
@@ -848,6 +854,7 @@ fn rt_obtain_clients(
                                 if netmask <= 128
                                     && (int_address == (int_address & (IPV6_MASKS[netmask])))
                                 {
+                                    let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                                     v6_clients_out[netmask].insert(int_address, value);
                                 } else {
                                     println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}", key);
@@ -864,7 +871,7 @@ fn rt_obtain_clients(
 
             println!("Ratchet Debug: Installed client {}", key);
         } else {
-            println!("Ratchet Warning: Invalid username passed around {}",parts[0]);
+            println!("Ratchet Warning: Invalid network/client passed around {}",line_ct);
             continue;
         }
 
