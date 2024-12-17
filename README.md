@@ -1,4 +1,4 @@
-> [!CAUTION]
+> [!WARNING]
 > This is unstable and has not been broadly validated against available TACACS+ clients, please use with caution!
 
 # ratchet
