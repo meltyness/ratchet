@@ -250,7 +250,7 @@ async fn tokio_main(custom_hostport: String,
         let clients_v6_container = clients_v6_container.clone();
         let credentials_container = credentials_container.clone();
         //
-        tokio::spawn( timeout(Duration::from_millis(6100),async move {
+        tokio::spawn( timeout(Duration::from_millis(60100),async move {
             // Stage 0: Check that this is a valid stream, produce some logs about the event.
             let mut stream = match stream {
                 Ok((s, peer_addr)) => {
