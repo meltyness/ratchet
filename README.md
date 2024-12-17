@@ -1,4 +1,5 @@
-⚠⚠⚠ This isn't ready for production yet ⚠⚠⚠
+> [!CAUTION]
+> This is unstable and has not been broadly validated against available TACACS+ clients, please use with caution!
 
 # ratchet
 Look! It's an Axe! No, a hatchet!
