@@ -61,13 +61,13 @@ In order to run the unit tests you'll need something like. They're far from comp
 There's future plans to possibly leverage GNS3 so that this system can be tested automatically against arbitrary/proprietary/emulated TACACS clients, but for now some manual testing has it sort of working mostly. 
 
 ## Future plans
-- [ ] beautiful front-end  
+- [ ] beautiful front-end
+  - [ ] Containerized distribution
 - [ ] Logging
 - [ ] authorization
 
 ### Later
 - [ ] CRUD config changes (currently will necessitate brief server relaunch)
-- [ ] Containerized distribution
 - [ ] Benchmarks / Higher-order integration testing
 - [ ] Rest of the protocol /
   - [ ] ... CHAP / MSCHAPv2
