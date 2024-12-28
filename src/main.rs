@@ -108,6 +108,7 @@ pub fn main() {
 
     let mut custom_clients_cmd = String::new();
     let mut custom_creds_cmd = String::new(); // Use String instead of &str
+    let mut custom_long_poll_cmd = String::new();
     let mut custom_hostport = String::from("[::]:44449");
     for (key, value) in env::vars() {
         if key == "RATCHET_READ_CLIENTS" {
@@ -116,6 +117,8 @@ pub fn main() {
             custom_creds_cmd = value; // Directly assign the value
         } else if key == "RATCHET_CUST_HOSTPORT" {
             custom_hostport = value; // Directly assign the value
+        } else if key == "RATCHET_LONG_POLL" {
+            custom_long_poll_cmd = value;
         }
     }
 
@@ -139,6 +142,10 @@ pub fn main() {
             &mut credentials,
             server_settings.rt_server_i18n,
         );
+    }
+   
+    if !custom_long_poll_cmd.is_empty() {
+        server_settings.rt_server_long_poll = custom_long_poll_cmd.as_str();
     }
 
     if env::args().any(|x| x == *"--add-insecure-test-credential-do-not-use".to_string()) {
