@@ -910,6 +910,7 @@ fn rt_obtain_clients(
             println!("Ratchet Debug: Installed client {}", key);
         } else {
             println!("Ratchet Warning: Invalid network/client passed around {}",line_ct);
+            println!("Ratchet Warning: Expected 2 parts, found {}", parts.len());
             continue;
         }
 
