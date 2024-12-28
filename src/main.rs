@@ -219,7 +219,7 @@ async fn tokio_main(custom_hostport: String,
         unsafe {
             ctrlc::set_handler(move || {
             ////println!("Ratchet Debug: Average dispatch time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
-            //println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
+            println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
                 exit(0);
             })
             .expect("Error setting Ctrl-C handler");
