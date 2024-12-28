@@ -572,9 +572,9 @@ impl RTAuthenReplyPacket {
         Self {
             status: TAC_PLUS_AUTHEN_STATUS_GETUSER,
             flags: 0,
-            server_msg_len: 27,
+            server_msg_len: 9,
             data_len: 0,
-            server_msg: "Type your ratchet username:".into(),
+            server_msg: "Username:".into(),
             data: vec![],
         }
     }
@@ -583,9 +583,9 @@ impl RTAuthenReplyPacket {
         Self {
             status: TAC_PLUS_AUTHEN_STATUS_GETPASS,
             flags: TAC_PLUS_REPLY_FLAG_NOECHO,
-            server_msg_len: 27,
+            server_msg_len: 9,
             data_len: 0,
-            server_msg: "Type your ratchet password:".into(),
+            server_msg: "Password:".into(),
             data: vec![],
         }
     }
