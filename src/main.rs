@@ -44,6 +44,7 @@ use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::time::timeout;
+use tokio::sync::RwLock;
 
 struct RTServerSettings<'a> {
     rt_server_max_length: u32, // = 65535, // https://www.rfc-editor.org/rfc/rfc8907.html#section-4.1-18
@@ -51,6 +52,7 @@ struct RTServerSettings<'a> {
     rt_perf_bench: bool,
     rt_server_read_clients: &'a str,
     rt_server_read_creds: &'a str,
+    rt_server_long_poll: &'a str,
 }
 
 impl<'a> RTServerSettings<'a> {
@@ -60,6 +62,7 @@ impl<'a> RTServerSettings<'a> {
         rt_perf_bench: bool,
         rt_server_read_clients: &'a str,
         rt_server_read_creds: &'a str,
+        rt_server_long_poll: &'a str,
     ) -> Self {
         Self {
             rt_server_max_length,
@@ -67,6 +70,7 @@ impl<'a> RTServerSettings<'a> {
             rt_perf_bench,
             rt_server_read_clients,
             rt_server_read_creds,
+            rt_server_long_poll,
         }
     }
 }
@@ -94,7 +98,8 @@ pub fn main() {
                                                                         true, 
                                                                         false, 
                                                                         "cat /dev/null", 
-                                                                        "cat /dev/null");
+                                                                        "cat /dev/null",
+                                                                    "sleep infinity");
 
     // Create a new HashMap
     let mut credentials: HashMap<String, String> = HashMap::new();
@@ -226,9 +231,49 @@ async fn tokio_main(custom_hostport: String,
         }
     }
 
-    let credentials_container = Arc::new(credentials);
-    let clients_v4_container = Arc::new(clients_v4);
-    let clients_v6_container = Arc::new(clients_v6);
+    let credentials_container = Arc::new(RwLock::new(credentials));
+    let clients_v4_container = Arc::new(RwLock::new(clients_v4));
+    let clients_v6_container = Arc::new(RwLock::new(clients_v6));
+
+    let long_poll_cmd = String::from_str(server_settings.rt_server_long_poll).unwrap();
+    let client_cmd = String::from_str(server_settings.rt_server_read_creds).unwrap();
+    let cred_cmd = String::from_str(server_settings.rt_server_read_creds).unwrap();
+    let pollv4_clients = clients_v4_container.clone();
+    let pollv6_clients = clients_v6_container.clone();
+    let poll_creds = credentials_container.clone();
+    tokio::spawn(async move {
+        let v4_container = pollv4_clients.clone();
+        let v6_container = pollv6_clients.clone();
+        let creds_ctr = poll_creds.clone();
+        loop {
+            let (prog, arg1) = match cfg!(target_os = "windows") {
+                true => ("cmd", "/C"),
+                false => ("sh", "-c")
+            };
+            let mut output = Command::new(prog)
+                .arg(arg1)
+                .arg(long_poll_cmd.as_str())
+                .output()
+                .expect("Failed to execute configured command.");
+
+            let mut clients_v4 = v4_container.write().await;
+            let mut clients_v6 = v6_container.write().await;
+            let mut credentials = creds_ctr.write().await;
+            clients_v4.iter_mut().map(|h| h.clear());
+            clients_v6.iter_mut().map(|h| h.clear());
+            credentials.clear();
+            rt_obtain_clients(
+                &client_cmd,
+                &mut clients_v4,
+                &mut clients_v6,
+            );
+            rt_obtain_creds(
+                &cred_cmd,
+                &mut credentials,
+                server_settings.rt_server_i18n,
+            );
+        }
+    });
 
     loop {
         let stream = listener.accept().await;
@@ -248,7 +293,7 @@ async fn tokio_main(custom_hostport: String,
 
         let clients_v4_container = clients_v4_container.clone();
         let clients_v6_container = clients_v6_container.clone();
-        let credentials_container = credentials_container.clone();
+        let credentials_container = credentials_container.clone(); 
         //
         tokio::spawn( timeout(Duration::from_millis(60100),async move {
             // Stage 0: Check that this is a valid stream, produce some logs about the event.
@@ -275,8 +320,8 @@ async fn tokio_main(custom_hostport: String,
 
             // Stage 0.5: Determine if this is a client
             // TODO: completely encapsulate this into the session eventually...
-            let v4_binding = clients_v4_container.clone();
-            let v6_binding = clients_v6_container.clone();
+            let v4_binding = clients_v4_container.read().await;
+            let v6_binding = clients_v6_container.read().await;
             let session_key = match rt_fetch_secret(
                 &stream.peer_addr().unwrap().ip(),
                 &v4_binding,
@@ -453,8 +498,8 @@ async fn tokio_main(custom_hostport: String,
                                 } else {
                                     raw_username.try_into().unwrap()
                                 };
-
-                                if let Some(p) = credentials_container.get(&username.to_string()) {
+                                let creds = credentials_container.read().await;
+                                if let Some(p) = creds.get(&username.to_string()) {
                                     // User known, check authentication success.
                                     //println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
                                     user_authenticated = bcrypt::verify(auth_request_password, p);
@@ -520,7 +565,8 @@ async fn tokio_main(custom_hostport: String,
                                     raw_username
                                 };
 
-                                if let Some(p) = credentials_container.get(&username.to_string()) {
+                                let creds = credentials_container.read().await;
+                                if let Some(p) = creds.get(&username.to_string()) {
                                     // User known, check authentication success.
                                     //println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
                                     user_authenticated = bcrypt::verify(&*auth_request_password, p);
