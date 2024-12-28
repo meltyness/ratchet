@@ -253,6 +253,7 @@ async fn tokio_main(custom_hostport: String,
         let v6_container = pollv6_clients.clone();
         let creds_ctr = poll_creds.clone();
         loop {
+            println!("Ratchet Info: Waiting async for poll update signal.");
             let (prog, arg1) = match cfg!(target_os = "windows") {
                 true => ("cmd", "/C"),
                 false => ("sh", "-c")
@@ -263,6 +264,7 @@ async fn tokio_main(custom_hostport: String,
                 .output()
                 .expect("Failed to execute configured command.");
 
+            println!("Ratchet Info: Poll update signal detected.");
             let mut clients_v4 = v4_container.write().await;
             let mut clients_v6 = v6_container.write().await;
             let mut credentials = creds_ctr.write().await;
@@ -279,6 +281,7 @@ async fn tokio_main(custom_hostport: String,
                 &mut credentials,
                 server_settings.rt_server_i18n,
             );
+            println!("Ratchet Info: Poll-directed update applied.");
         }
     });
 
