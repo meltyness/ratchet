@@ -268,8 +268,8 @@ async fn tokio_main(custom_hostport: String,
             let mut clients_v4 = v4_container.write().await;
             let mut clients_v6 = v6_container.write().await;
             let mut credentials = creds_ctr.write().await;
-            clients_v4.iter_mut().map(|h| h.clear());
-            clients_v6.iter_mut().map(|h| h.clear());
+            clients_v4.iter_mut().for_each(|h| h.clear());
+            clients_v6.iter_mut().for_each(|h| h.clear());
             credentials.clear();
             rt_obtain_clients(
                 &client_cmd,
