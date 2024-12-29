@@ -61,8 +61,6 @@ In order to run the unit tests you'll need something like. They're far from comp
 There's future plans to possibly leverage GNS3 so that this system can be tested automatically against arbitrary/proprietary/emulated TACACS clients, but for now some manual testing has it sort of working mostly. 
 
 ## Future plans
-- [ ] beautiful front-end
-  - [ ] Containerized distribution
 - [ ] Logging
 - [ ] authorization
 
@@ -81,6 +79,8 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 
 ### Done
 
+- [x] ~~beautiful~~ minimalist front-end
+  - [x] Containerized distribution
 - [x] complete memory-hardening
   - [x] ... and authenticating against unrecoverable passwords
 - [x] assess or implement async to retain maximum performance
