@@ -123,11 +123,11 @@ pub fn main() {
     }
 
     if !custom_clients_cmd.is_empty() {
-        server_settings.rt_server_read_creds = custom_clients_cmd.as_str(); // Use the String here
+        server_settings.rt_server_read_clients = custom_clients_cmd.as_str(); // Use the String here
 
         // Use the configured command to obtain creds.
         rt_obtain_clients(
-            server_settings.rt_server_read_creds,
+            server_settings.rt_server_read_clients,
             &mut clients_v4,
             &mut clients_v6,
         );
@@ -243,7 +243,7 @@ async fn tokio_main(custom_hostport: String,
     let clients_v6_container = Arc::new(RwLock::new(clients_v6));
 
     let long_poll_cmd = String::from_str(server_settings.rt_server_long_poll).unwrap();
-    let client_cmd = String::from_str(server_settings.rt_server_read_creds).unwrap();
+    let client_cmd = String::from_str(server_settings.rt_server_read_clients).unwrap();
     let cred_cmd = String::from_str(server_settings.rt_server_read_creds).unwrap();
     let pollv4_clients = clients_v4_container.clone();
     let pollv6_clients = clients_v6_container.clone();
@@ -258,7 +258,7 @@ async fn tokio_main(custom_hostport: String,
                 true => ("cmd", "/C"),
                 false => ("sh", "-c")
             };
-            let mut output = Command::new(prog)
+            let output = Command::new(prog)
                 .arg(arg1)
                 .arg(long_poll_cmd.as_str())
                 .output()
