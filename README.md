@@ -15,7 +15,7 @@ It implements PAP and ASCII.
 
 It's written in a memory-safe language, and has very few dependencies.
 
-There's a frontend available [here](https://github.com/meltyness/ratchet-pawl), just add glue, middleware, or Nullsoft Installer.
+There's a frontend available [here](https://github.com/meltyness/ratchet-pawl), just add glue, middleware, or Nullsoft Installer; [a docker example is available](https://github.com/meltyness/ratchet-cycle).
 
 ## Status
 This server implements a slim portion of the TACACS+ protocol.
