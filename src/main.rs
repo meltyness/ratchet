@@ -222,8 +222,8 @@ async fn tokio_main(custom_hostport: String,
             rt_get_user_name()
         ),
     };
-
-   println!("Ratchet Info: NOWLISTENING bound to some port 49");
+    // CONTRACT: cargo tests use 'NOWLISTENING' in order to validate server readiness
+    println!("Ratchet Info: NOWLISTENING bound to some port 49");
 
     // benchmarking
     if server_settings.rt_perf_bench {
