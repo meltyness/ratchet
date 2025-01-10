@@ -17,6 +17,8 @@ It's written in a memory-safe language, and has very few dependencies.
 
 There's a frontend available [here](https://github.com/meltyness/ratchet-pawl), just add glue, middleware, or Nullsoft Installer; [a docker example is available](https://github.com/meltyness/ratchet-cycle).
 
+See https://github.com/meltyness/ratchet-cycle for a neat way to deploy the whole thing.
+
 ## Status
 This server implements a slim portion of the TACACS+ protocol.
 
