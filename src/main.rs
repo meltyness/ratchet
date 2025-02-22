@@ -238,52 +238,23 @@ async fn tokio_main(custom_hostport: String,
         }
     }
 
+    // Long-polling needs to update these on user/API-initiated changes
+    // TODO: Migrate to something like dashmap to optimize
     let credentials_container = Arc::new(RwLock::new(credentials));
     let clients_v4_container = Arc::new(RwLock::new(clients_v4));
     let clients_v6_container = Arc::new(RwLock::new(clients_v6));
 
-    let long_poll_cmd = String::from_str(server_settings.rt_server_long_poll).unwrap();
-    let client_cmd = String::from_str(server_settings.rt_server_read_clients).unwrap();
-    let cred_cmd = String::from_str(server_settings.rt_server_read_creds).unwrap();
     let pollv4_clients = clients_v4_container.clone();
     let pollv6_clients = clients_v6_container.clone();
     let poll_creds = credentials_container.clone();
-    tokio::spawn(async move {
-        let v4_container = pollv4_clients.clone();
-        let v6_container = pollv6_clients.clone();
-        let creds_ctr = poll_creds.clone();
-        loop {
-           //println!("Ratchet Info: Waiting async for poll update signal.");
-            let (prog, arg1) = match cfg!(target_os = "windows") {
-                true => ("cmd", "/C"),
-                false => ("sh", "-c")
-            };
-            let output = Command::new(prog)
-                .arg(arg1)
-                .arg(long_poll_cmd.as_str())
-                .output()
-                .expect("Failed to execute configured command.");
 
-           //println!("Ratchet Info: Poll update signal detected.");
-            let mut clients_v4 = v4_container.write().await;
-            let mut clients_v6 = v6_container.write().await;
-            let mut credentials = creds_ctr.write().await;
-            clients_v4.iter_mut().for_each(|h| h.clear());
-            clients_v6.iter_mut().for_each(|h| h.clear());
-            credentials.clear();
-            rt_obtain_clients(
-                &client_cmd,
-                &mut clients_v4,
-                &mut clients_v6,
-            );
-            rt_obtain_creds(
-                &cred_cmd,
-                &mut credentials,
-                server_settings.rt_server_i18n,
-            );
-           println!("Ratchet Info: Poll-directed update applied.");
-        }
-    });
+    rt_launch_long_polling_process(server_settings.rt_server_i18n,
+         server_settings.rt_server_read_clients.to_string(),
+         server_settings.rt_server_read_creds.to_string(),
+         server_settings.rt_server_long_poll.to_string(), 
+         poll_creds, 
+         pollv4_clients,
+         pollv6_clients);
 
     loop {
         let stream = listener.accept().await;
@@ -658,6 +629,81 @@ async fn tokio_main(custom_hostport: String,
         //     unsafe {RUNNING_AVG = RUNNING_AVG + ((end_time - start_time)).as_secs_f64();}
         // }
     }
+}
+
+fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_cmd: String, long_poll_cmd: String,
+                                poll_creds: Arc<RwLock<HashMap<String, String>>>,
+                                pollv4_clients: Arc<RwLock<[HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33]>>,
+                                pollv6_clients: Arc<RwLock<[HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129]>>) {
+    tokio::spawn(async move {
+        let v4_container = pollv4_clients.clone();
+        let v6_container = pollv6_clients.clone();
+        let creds_ctr = poll_creds.clone();
+        let mut update_serial = 0u64;
+        let mut send_serial = false;
+        loop {
+           //println!("Ratchet Info: Waiting async for poll update signal.");
+            let (prog, arg1) = match cfg!(target_os = "windows") {
+                true => ("cmd", "/C"),
+                false => ("sh", "-c")
+            };
+            let output = if send_serial {
+                Command::new(prog)
+                    .arg(arg1)
+                    .arg(format!("{} {update_serial}", long_poll_cmd))
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .expect("Failed to execute configured command")
+            } else {
+                Command::new(prog)
+                    .arg(arg1)
+                    .arg(long_poll_cmd.clone())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .expect("Failed to execute configured command")
+            };
+
+            let text_response = output.wait_with_output().expect("Failed to open STDOUT");
+            println!("Ratchet Info: Saw {:?} from Long Poll command.", text_response.stdout);
+            if text_response.stdout.len() > 7 { // "U p d a t e _ \d+ \n"
+                // if we detect that we're on an updated server, send serial updates in the future
+                send_serial = true;
+                let s_num_text_b10 = text_response.stdout.iter()
+                                    .skip(7)
+                                    .take(20)// clamp this in-case something weird happens.
+                                    .fold(vec![],
+                                    |mut v, &c| {if c >= b'0' && c <= b'9' { v.push(c); } v});
+                // TODO: using base10 is like 40x worse, but this isn't a hot path
+                // PANIC: Enforcing that s_num_text_b10 contains only "0-9" should ensure that it's always radix: 10.
+                match u64::from_str_radix(&String::from_utf8_lossy(&s_num_text_b10), 10) {
+                    Ok(n) => {
+                        update_serial = n;
+                        println!("Ratchet Info: Computed {n} planning to send serial: {send_serial}");
+                    },
+                    Err(_) => {update_serial = 0; send_serial = false; println!("Ratchet Info: Issue parsing serial, reverting to old behavior.")},
+                }
+            }        
+
+           //println!("Ratchet Info: Poll update signal detected.");
+            let mut clients_v4 = v4_container.write().await;
+            let mut clients_v6 = v6_container.write().await;
+            let mut credentials = creds_ctr.write().await;
+            clients_v4.iter_mut().for_each(|h| h.clear());
+            clients_v6.iter_mut().for_each(|h| h.clear());
+            credentials.clear();
+            rt_obtain_clients(
+                &clients_cmd,
+                &mut clients_v4,
+                &mut clients_v6,
+            );
+            rt_obtain_creds(
+                &cred_cmd,
+                &mut credentials,
+                server_i18n,
+            );
+           println!("Ratchet Info: Poll-directed update applied.");
+        }
+    });
 }
 
 fn rt_fetch_secret<'a>(
