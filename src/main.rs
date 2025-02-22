@@ -664,7 +664,7 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
             };
 
             let text_response = output.wait_with_output().expect("Failed to open STDOUT");
-            println!("Ratchet Info: Saw {:?} from Long Poll command.", text_response.stdout);
+            //println!("Ratchet Info: Saw {:?} from Long Poll command.", text_response.stdout);
             if text_response.stdout.len() > 7 { // "U p d a t e _ \d+ \n"
                 // if we detect that we're on an updated server, send serial updates in the future
                 send_serial = true;
@@ -678,7 +678,7 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
                 match u64::from_str_radix(&String::from_utf8_lossy(&s_num_text_b10), 10) {
                     Ok(n) => {
                         update_serial = n;
-                        println!("Ratchet Info: Computed {n} planning to send serial: {send_serial}");
+                        //println!("Ratchet Info: Computed {n} planning to send serial: {send_serial}");
                     },
                     Err(_) => {update_serial = 0; send_serial = false; println!("Ratchet Info: Issue parsing serial, reverting to old behavior.")},
                 }
