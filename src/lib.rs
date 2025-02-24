@@ -8,8 +8,9 @@
 
 //use std::{fmt, io::Read, io::Write, net::TcpStream};
 
+use flex_alloc_secure::{ExposeProtected, alloc::SecureAlloc, boxed::ProtectedBox, flex_alloc};
+use std::collections::HashMap;
 use std::fmt;
-use flex_alloc_secure::{alloc::SecureAlloc, boxed::ProtectedBox, flex_alloc, ExposeProtected};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -81,17 +82,18 @@ impl RTHeader {
     /// TOOD: Do we want to abstract the session beyond the behaviors specified
     /// in the main loop? why?
     ///
-    pub fn get_resp_header(ses: u32, r: &RTAuthenReplyPacket, cur_seq: u8, version: u8) -> Self {
+    pub fn get_resp_header<T>(r: &T, seqno: u8, sesid: u32, version: RTTACVersion) -> Self
+    where
+        T: RTSerializablePacket,
+    {
         #[allow(clippy::cast_possible_truncation)]
-        let lt = r.serialize().len() as u32;
-        let seq_no = cur_seq + 1;
+        let lt = r.pred_length();
         Self {
-            tacp_hdr_version: RTTACVersion::from_byte(version)
-                .expect("We only ingest valid versions"),
-            tacp_hdr_type: RTTACType::TAC_PLUS_AUTHEN,
-            tacp_hdr_seqno: seq_no,
-            tacp_hdr_flags: 0,
-            tacp_hdr_sesid: ses,
+            tacp_hdr_version: version,
+            tacp_hdr_type: r.tx_type(),
+            tacp_hdr_seqno: seqno + 1,
+            tacp_hdr_flags: 0, // Optionally, "NOECHO"
+            tacp_hdr_sesid: sesid,
             tacp_hdr_length: lt,
         }
     }
@@ -189,7 +191,8 @@ impl RTHeader {
             Ok(r) => Ok(RTDecodedPacket::RTAuthenPacket(
                 RTAuthenPacket::RTAuthenStartPacket(r),
             )),
-            Err(e) => { // TODO: Result<Option...? hm.
+            Err(e) => {
+                // TODO: Result<Option...? hm.
                 //println!("Ratchet Debug: Packet was not Start packet, trying Continue packet");
                 match RTAuthenContinuePacket::from_raw_packet(&pck_buf) {
                     Ok(r) => Ok(RTDecodedPacket::RTAuthenPacket(
@@ -204,18 +207,52 @@ impl RTHeader {
         }
     }
 
+    pub async fn parse_autz_packet(
+        &self,
+        stream: &mut TcpStream,
+        key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
+    ) -> Result<RTDecodedPacket, &str> {
+        let md5pad = self.compute_md5_pad(key);
+        let mut pck_buf = vec![0u8; self.get_expected_packet_length()];
+        // TODO: this blocks
+        match stream.read_exact(&mut pck_buf).await {
+            Ok(_) => (),
+            Err(e) => {
+                //println!("Ratchet Error: TCP Error from subsystem: {}", e);
+                return Err("Segment too short, check client implementation.");
+            }
+        }
+
+        //println!("Ratchet Debug: Comparing buf: {} and pad: {}", pck_buf.len(), md5pad.len());
+
+        let pck_buf = md5_xor(&pck_buf, &md5pad);
+
+        match RTAuthorRequestPacket::from_raw_packet(&pck_buf) {
+            Ok(r) => Ok(RTDecodedPacket::RTAuthorPacket(
+                RTAuthorPacket::RTAuthorRequestPacket(r),
+            )),
+            Err(e) => {
+                println!("Parse error {}", e);
+                return Err("Packet field error in authentication.");
+            }
+        }
+    }
+
     /// Generate the pad and truncate it to length
     ///
     /// This seems to work for the implementations checked.
     ///
-    pub fn compute_md5_pad(&self, key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Vec<u8> {
+    pub fn compute_md5_pad(
+        &self,
+        key: &ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
+    ) -> Vec<u8> {
         let payload_length = self.get_expected_packet_length();
         let mut md5ctx = md5::Context::new();
         let mut md5pad = vec![];
         let mut md5last = vec![];
-        key.expose_read( |inner_key| {
+        key.expose_read(|inner_key| {
             md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-            md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
+            md5ctx.consume(inner_key.iter().map(|z| *z).collect::<Vec<u8>>());
             md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
             md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
 
@@ -226,7 +263,7 @@ impl RTHeader {
             while md5pad.len() < payload_length {
                 let mut md5ctx = md5::Context::new();
                 md5ctx.consume(self.tacp_hdr_sesid.to_be_bytes());
-                md5ctx.consume(inner_key.iter().map(|z|*z).collect::<Vec<u8>>());
+                md5ctx.consume(inner_key.iter().map(|z| *z).collect::<Vec<u8>>());
                 md5ctx.consume([self.tacp_hdr_version.clone() as u8]);
                 md5ctx.consume(self.tacp_hdr_seqno.to_be_bytes());
                 md5ctx.consume(md5last.clone());
@@ -242,10 +279,11 @@ impl RTHeader {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
 #[repr(u8)]
 pub enum RTTACVersion {
-    // Always prefix with TAC_PLUS_MAJOR_VER := 0xc
+    // Always prefix with TAC_PLUS_MAJOR_VER = 0xc
     TAC_PLUS_MINOR_VER_DEFAULT = 0xc0,
     TAC_PLUS_MINOR_VER_ONE = 0xc1,
 }
@@ -262,6 +300,7 @@ impl_global_consts!(
     TAC_PLUS_MINOR_VER_ONE
 );
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone)]
 #[repr(u8)]
 pub enum RTTACType {
@@ -269,8 +308,9 @@ pub enum RTTACType {
     TAC_PLUS_AUTHOR = 0x02, //(Authorization)
     TAC_PLUS_ACCT = 0x03,   //(Accounting)
 }
-impl_from_byte!(RTTACType, TAC_PLUS_AUTHEN);
+impl_from_byte!(RTTACType, TAC_PLUS_AUTHEN, TAC_PLUS_AUTHOR);
 
+#[allow(non_camel_case_types)]
 #[repr(u8)]
 enum RTTACFlag {
     TAC_PLUS_NULL_FLAG = 0x00,        // This is actually a mask flag, define 0.
@@ -285,6 +325,12 @@ pub enum RTDecodedPacket {
     RTAuthenPacket(RTAuthenPacket),
     RTAuthorPacket(RTAuthorPacket),
     RTAcctPacket(RTAcctPacket),
+}
+
+pub trait RTSerializablePacket {
+    fn serialize(&self) -> Vec<u8>;
+    fn pred_length(&self) -> u32; // TODO: For performance, it would be better if we could just guess.
+    fn tx_type(&self) -> RTTACType;
 }
 
 #[derive(Debug)]
@@ -469,6 +515,7 @@ impl RTAuthenStartPacket {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u8)]
 pub enum RTAuthenPacketAction {
@@ -478,12 +525,14 @@ pub enum RTAuthenPacketAction {
 }
 impl_from_byte!(RTAuthenPacketAction, TAC_PLUS_AUTHEN_LOGIN);
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u8)]
 pub enum RTAuthenPacketPriv {
     BYTE_IDX = 1,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u8)]
 pub enum RTAuthenPacketType {
@@ -499,6 +548,7 @@ impl_from_byte!(
     TAC_PLUS_AUTHEN_TYPE_ASCII
 );
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u8)]
 pub enum RTAuthenPacketService {
@@ -512,7 +562,11 @@ pub enum RTAuthenPacketService {
     TAC_PLUS_AUTHEN_SVC_NASI = 0x08,
     TAC_PLUS_AUTHEN_SVC_FWPROXY = 0x09,
 }
-impl_from_byte!(RTAuthenPacketService, TAC_PLUS_AUTHEN_SVC_LOGIN);
+impl_from_byte!(
+    RTAuthenPacketService,
+    TAC_PLUS_AUTHEN_SVC_NONE,
+    TAC_PLUS_AUTHEN_SVC_LOGIN
+);
 
 // RTAuthenReplyPacket
 pub struct RTAuthenReplyPacketIndexes {
@@ -540,6 +594,7 @@ pub struct RTAuthenReplyPacket {
     data: Vec<u8>,
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug)]
 #[repr(u8)]
 pub enum RTAuthenReplyStatus {
@@ -624,9 +679,11 @@ impl RTAuthenReplyPacket {
             data: vec![],
         }
     }
+}
 
+impl RTSerializablePacket for RTAuthenReplyPacket {
     /// This prepares to stream a response
-    pub fn serialize(&self) -> Vec<u8> {
+    fn serialize(&self) -> Vec<u8> {
         let mut result = Vec::new();
 
         // Serialize the fixed-size fields
@@ -640,6 +697,14 @@ impl RTAuthenReplyPacket {
         result.extend(&self.data);
 
         result
+    }
+
+    fn pred_length(&self) -> u32 {
+        6u32 + (self.server_msg.len() + self.data.len()) as u32
+    }
+
+    fn tx_type(&self) -> RTTACType {
+        RTTACType::TAC_PLUS_AUTHEN // An RTAuthenReplyPacket is always a TAC_PLUS_AUTHEN
     }
 }
 
@@ -737,7 +802,340 @@ impl RTAuthenContinuePacket {
 }
 
 #[derive(Debug)]
-pub struct RTAuthorPacket {}
+pub enum RTAuthorPacket {
+    RTAuthorRequestPacket(RTAuthorRequestPacket),
+    RTAuthorRespPacket(RTAuthorRespPacket),
+}
+
+pub struct RTAuthorRequestPacketIndexes {
+    authen_method: usize,
+    priv_level: usize,
+    authen_type: usize,
+    authen_svc: usize,
+    user_len: usize,
+    port_len: usize,
+    rem_addr_len: usize,
+    arg_cnt: usize,
+}
+
+const RT_AUTHORIZATION_REQUEST_PACKET_INDEXES: RTAuthorRequestPacketIndexes =
+    RTAuthorRequestPacketIndexes {
+        authen_method: 0,
+        priv_level: 1,
+        authen_type: 2,
+        authen_svc: 3,
+        user_len: 4,
+        port_len: 5,
+        rem_addr_len: 6,
+        arg_cnt: 7,
+    };
+
+#[derive(Debug)]
+pub struct RTAuthorRequestPacket {
+    authen_method: RTAuthorPacketMethod,
+    priv_lvl: u8,
+    pub authen_type: RTAuthenPacketType,
+    authen_service: RTAuthenPacketService,
+    user_len: u8,
+    port_len: u8,
+    rem_addr_len: u8,
+    pub user: Vec<u8>,
+    port: Vec<u8>,
+    rem_addr: Vec<u8>,
+    pub args: HashMap<String, (bool, Vec<String>)>, // "Multiple cmd-arg arguments may be specified..."
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+#[repr(u8)]
+pub enum RTAuthorPacketMethod {
+    TAC_PLUS_AUTHEN_METH_NOT_SET = 0x00,
+    TAC_PLUS_AUTHEN_METH_NONE = 0x01,
+    TAC_PLUS_AUTHEN_METH_KRB5 = 0x02,
+    TAC_PLUS_AUTHEN_METH_LINE = 0x03,
+    TAC_PLUS_AUTHEN_METH_ENABLE = 0x04,
+    TAC_PLUS_AUTHEN_METH_LOCAL = 0x05,
+    TAC_PLUS_AUTHEN_METH_TACACSPLUS = 0x06,
+    TAC_PLUS_AUTHEN_METH_GUEST = 0x08,
+    TAC_PLUS_AUTHEN_METH_RADIUS = 0x10,
+    TAC_PLUS_AUTHEN_METH_KRB4 = 0x11,
+    TAC_PLUS_AUTHEN_METH_RCMD = 0x20,
+}
+impl_from_byte!(
+    RTAuthorPacketMethod,
+    TAC_PLUS_AUTHEN_METH_NOT_SET,
+    TAC_PLUS_AUTHEN_METH_NONE,
+    TAC_PLUS_AUTHEN_METH_KRB5,
+    TAC_PLUS_AUTHEN_METH_LINE,
+    TAC_PLUS_AUTHEN_METH_ENABLE,
+    TAC_PLUS_AUTHEN_METH_LOCAL,
+    TAC_PLUS_AUTHEN_METH_TACACSPLUS,
+    TAC_PLUS_AUTHEN_METH_GUEST,
+    TAC_PLUS_AUTHEN_METH_RADIUS,
+    TAC_PLUS_AUTHEN_METH_KRB4,
+    TAC_PLUS_AUTHEN_METH_RCMD
+);
+
+impl RTAuthorRequestPacket {
+    #[allow(clippy::indexing_slicing)]
+    #[allow(non_snake_case)]
+    pub fn from_raw_packet(buf: &[u8]) -> Result<Self, &str> {
+        if buf.len() < 8 {
+            return Err("Malformed authorization request (too short)");
+        }
+
+        let arg_cnt = buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.arg_cnt] as usize;
+        if arg_cnt > 24 {
+            // avoid abuse and excessive allocations
+            return Err("Too many authz args");
+        }
+
+        // Tee off args_total and arg_tuples, for later use.
+        // Note: since this uses the fallible version we don't need to do a forward check of buffer size
+        let (args_total, arg_tuples) =
+            match (0..arg_cnt).try_fold((0usize, vec![]), |(sum, mut arg_tuples), i| {
+                match buf.get(8 + i) {
+                    Some(&arg_len) => {
+                        arg_tuples.push((sum, sum + arg_len as usize));
+                        Some((sum + arg_len as usize, arg_tuples))
+                    }
+                    None => None,
+                }
+            }) {
+                Some(tot) => tot,
+                None => {
+                    return Err("Missing args");
+                }
+            };
+
+        let purported_size = 8 + 
+            (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize) +
+            (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len] as usize) +
+            (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.rem_addr_len] as usize) +
+            arg_cnt + //one for each delicious byte
+            args_total;
+        let expected_size = buf.len(); // buf.len() will have been selected from the header, should be guaranteed by
+        if purported_size != expected_size {
+            // TcpStream::read_exact, and client behavior to be the next protocol packet
+            // This check guarantees that all reads directed by arg_tuples are in-bounds
+            // since arg_tuples.last() == args_total
+            // highest read inside of the struct below is (expected_size - 1), comparing purported_size and RT_AUTHOR_TEXT_START, RT_ARGS_TEXT_START, and args_total
+            return Err("Malformed authz packet size (doesn't add up)");
+        }
+        let RT_AUTHOR_TEXT_START = 8 + arg_cnt;
+
+        let RT_ARGS_TEXT_START = RT_AUTHOR_TEXT_START
+            + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)
+            + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len] as usize)
+            + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.rem_addr_len] as usize);
+
+        // construct argument hashmap
+        let arg_hash = match arg_tuples.iter().try_fold(
+            HashMap::with_capacity(arg_cnt),
+            |mut h: HashMap<String, (bool, Vec<String>)>, (arg_start, arg_end)| {
+                let arg_start = arg_start + RT_ARGS_TEXT_START;
+                let arg_end = arg_end + RT_ARGS_TEXT_START;
+                if let Some((arg_sep, arg_t, arg_v)) = // try and fetch an AVP from buffer
+                    buf[arg_start..arg_end].iter().try_fold(
+                        (b'\0', String::new(), String::new()),
+                        |(arg_sep, mut arg_t, mut arg_v), &n| {
+                            if arg_sep == b'\0' {
+                                if n == b'*' || n == b'=' {
+                                    Some((n, arg_t, arg_v))
+                                } else {
+                                    if n.is_ascii_graphic() {
+                                        arg_t.push(n as char);
+                                        Some((arg_sep, arg_t, arg_v))
+                                    } else {
+                                        None // with 3.7, A's must be ASCII printable
+                                    }
+                                }
+                            } else {
+                                if n.is_ascii_graphic() {
+                                    // it is acceptable to put arg_sep into value
+                                    arg_v.push(n as char);
+                                    Some((arg_sep, arg_t, arg_v))
+                                } else {
+                                    None // with 3.7, V's must be ASCII printable
+                                }
+                            }
+                        },
+                    )
+                {
+                    let mandatory = arg_sep == b'=';
+                    match h.get_mut(&arg_t) {
+                        Some((_, vals)) => {
+                            vals.push(arg_v);
+                        }
+                        None => {
+                            h.insert(arg_t, (mandatory, vec![arg_v]));
+                        }
+                    }
+                    Some(h)
+                } else {
+                    None // Any error producing an AVP propagates
+                }
+            },
+        ) {
+            Some(h) => h,
+            None => {
+                return Err("Args error");
+            }
+        };
+
+        let re = Self {
+            authen_method: RTAuthorPacketMethod::from_byte(
+                buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.authen_method],
+            )?,
+            priv_lvl: buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.priv_level],
+            authen_type: RTAuthenPacketType::from_byte(
+                buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.authen_type],
+            )?,
+            authen_service: RTAuthenPacketService::from_byte(
+                buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.authen_svc],
+            )?,
+
+            user_len: buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len],
+            port_len: buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len],
+            rem_addr_len: buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.rem_addr_len],
+            user: buf[RT_AUTHOR_TEXT_START
+                ..RT_AUTHOR_TEXT_START
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)]
+                .to_vec(),
+
+            port: buf[RT_AUTHOR_TEXT_START
+                + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)
+                ..RT_AUTHOR_TEXT_START
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len] as usize)]
+                .to_vec(),
+
+            rem_addr: buf[RT_AUTHOR_TEXT_START
+                + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)
+                + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len] as usize)
+                ..RT_AUTHOR_TEXT_START
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.user_len] as usize)
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.port_len] as usize)
+                    + (buf[RT_AUTHORIZATION_REQUEST_PACKET_INDEXES.rem_addr_len] as usize)]
+                .to_vec(),
+
+            args: arg_hash,
+        };
+
+        // Not sure how I feel about doing this after instantiating but, it's a nitpick I think.
+        if re
+            .port
+            .iter()
+            .map(|c| c.is_ascii_control())
+            .reduce(|c_1, cs| c_1 || cs)
+            .unwrap_or(false)
+        {
+            return Err("Non-printable characters in TACACS Authz Req port");
+        }
+
+        if re
+            .rem_addr
+            .iter()
+            .map(|c| c.is_ascii_control())
+            .reduce(|c_1, cs| c_1 || cs)
+            .unwrap_or(false)
+        {
+            return Err("Non-printable characters in TACACS Authz Req rem_addr");
+        }
+
+        Ok(re)
+    }
+
+    pub fn reconstruct_command(&self) -> Option<String> {
+        match self.args.get("cmd") {
+            Some((_, cmd_string)) => {
+                let basic = cmd_string.join(" ");
+                match self.args.get("cmd-arg") {
+                    Some((_, arg_list)) => Some(arg_list.iter().fold(basic, |mut total, s| {
+                        total.push(' ');
+                        total.push_str(&s);
+                        total
+                    })),
+                    None => Some(basic),
+                }
+            }
+            None => None,
+        }
+    }
+}
+
+pub struct RTAuthorRespPacketIndexes {
+    status: usize,
+    arg_cnt: usize,
+    srv_msg_len: usize,
+    data_len: usize,
+}
+
+const RT_AUTHORIZATION_RESPONSE_PACKET_INDEXES: RTAuthorRespPacketIndexes =
+    RTAuthorRespPacketIndexes {
+        status: 0,
+        arg_cnt: 1,
+        srv_msg_len: 2,
+        data_len: 4,
+    };
+
+#[derive(Debug)]
+pub struct RTAuthorRespPacket {
+    status: RTAuthorStatus,
+    arg_cnt: u8,
+    server_msg_len: u16,
+    data_len: u16,
+    server_msg: Vec<u8>,
+    data: Vec<u8>,
+    args: HashMap<String, Vec<u8>>,
+}
+
+impl RTSerializablePacket for RTAuthorRespPacket {
+    fn serialize(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+
+        // Serialize the fixed-size fields
+        result.push(self.status.clone() as u8);
+        result.push(self.arg_cnt);
+        result.extend(&self.server_msg_len.to_be_bytes());
+        result.extend(&self.data_len.to_be_bytes());
+
+        // Serialize the variable-size fields
+        result.extend(&self.server_msg);
+        result.extend(&self.data);
+
+        // TODO: special considerations for PASS_REPL, ERROR, FOLLOW
+
+        result
+    }
+
+    fn pred_length(&self) -> u32 {
+        6u32 + (self.server_msg.len() + self.data.len()) as u32
+    }
+
+    fn tx_type(&self) -> RTTACType {
+        RTTACType::TAC_PLUS_AUTHOR
+    }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Clone, Debug)]
+#[repr(u8)]
+pub enum RTAuthorStatus {
+    TAC_PLUS_AUTHOR_STATUS_PASS_ADD = 0x01,
+    TAC_PLUS_AUTHOR_STATUS_PASS_REPL = 0x02,
+    TAC_PLUS_AUTHOR_STATUS_FAIL = 0x10,
+    TAC_PLUS_AUTHOR_STATUS_ERROR = 0x11,
+    TAC_PLUS_AUTHOR_STATUS_FOLLOW = 0x21,
+}
+impl_from_byte!(
+    RTAuthorStatus,
+    TAC_PLUS_AUTHOR_STATUS_PASS_ADD,
+    TAC_PLUS_AUTHOR_STATUS_PASS_REPL,
+    TAC_PLUS_AUTHOR_STATUS_FAIL,
+    TAC_PLUS_AUTHOR_STATUS_ERROR,
+    TAC_PLUS_AUTHOR_STATUS_FOLLOW
+);
 
 #[derive(Debug)]
 pub struct RTAcctPacket {}
@@ -745,29 +1143,42 @@ pub struct RTAcctPacket {}
 pub struct RTAuthenSess<'a> {
     rt_curr_seqno: u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
     rt_my_sessid: u32,
-    rt_my_version: u8,
+    rt_my_version: RTTACVersion,
     rt_key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
 }
 
 impl<'a> RTAuthenSess<'a> {
-    pub fn from_header(r: &RTHeader, key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>) -> Self {
+    pub fn from_header(
+        r: &RTHeader,
+        key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
+    ) -> Self {
         Self {
             rt_curr_seqno: r.tacp_hdr_seqno,
             rt_my_sessid: r.tacp_hdr_sesid,
-            rt_my_version: (r.tacp_hdr_version.clone() as u8),
+            rt_my_version: r.tacp_hdr_version.clone(),
             rt_key: key,
         }
     }
 
-    pub fn next_header(&mut self, reply: &RTAuthenReplyPacket) -> RTHeader {
+    pub fn next_header<T>(&mut self, reply: &T) -> RTHeader
+    where
+        T: RTSerializablePacket,
+    {
         return RTHeader::get_resp_header(
-            self.rt_my_sessid,
-            &reply,
+            reply,
             self.rt_curr_seqno,
-            self.rt_my_version,
+            self.rt_my_sessid,
+            self.rt_my_version.clone(),
         );
     }
 
+    /// This serves multiple purposes
+    /// When processing ASCII authentication typical behavior only optionally includes
+    /// the username in the first packet.
+    ///
+    /// So at the protocol level, first we request the username,
+    /// then we request the password.
+    ///
     pub async fn do_get(
         &mut self,
         mut stream: &mut TcpStream,
@@ -793,9 +1204,10 @@ impl<'a> RTAuthenSess<'a> {
                 }
                 //println!("Ratchet Debug: Sent {} bytes", v)
             }
-            Err(e) => (),
-            //println!("Ratchet Error: TCP Error, {}", e),
-            //},
+            Err(e) => {
+                return Err("Broken pipe");
+                //println!("Ratchet Error: TCP Error, {}", e),
+            }
         }
 
         // TODO: Ok... session loop is starting over...? Not really it's a sequence .... hmmmmmmmmm...
@@ -915,6 +1327,112 @@ impl<'a> RTAuthenSess<'a> {
             Err(e) => {
                 //println!("Ratchet Error: TCP Error, {}", e);
                 false
+            }
+        }
+    }
+
+    fn inc_seqno(&mut self) -> Result<bool, &str> {
+        if self.rt_curr_seqno == 255 {
+            return Err("Session restart");
+        } else {
+            self.rt_curr_seqno += 1;
+            return Ok(true);
+        }
+    }
+}
+
+pub struct RTAutzSess<'a> {
+    rt_curr_seqno: u8, // 1-255, always rx odd tx even, session ends if a wrap occurs
+    rt_my_sessid: u32,
+    rt_my_version: RTTACVersion,
+    rt_key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
+}
+
+impl<'a> RTAutzSess<'a> {
+    pub fn from_header(
+        r: &RTHeader,
+        key: &'a ProtectedBox<flex_alloc::vec::Vec<u8, SecureAlloc>>,
+    ) -> Self {
+        Self {
+            rt_curr_seqno: r.tacp_hdr_seqno,
+            rt_my_sessid: r.tacp_hdr_sesid,
+            rt_my_version: r.tacp_hdr_version.clone(),
+            rt_key: key,
+        }
+    }
+
+    pub fn next_header<T>(&mut self, reply: &T) -> RTHeader
+    where
+        T: RTSerializablePacket,
+    {
+        return RTHeader::get_resp_header(
+            reply,
+            self.rt_curr_seqno,
+            self.rt_my_sessid,
+            self.rt_my_version.clone(),
+        );
+    }
+
+    pub async fn send_success_packet(&mut self, stream: &mut TcpStream) -> Result<bool, &str> {
+        let generic_authz_success = RTAuthorRespPacket {
+            status: RTAuthorStatus::TAC_PLUS_AUTHOR_STATUS_PASS_ADD,
+            arg_cnt: 0,
+            server_msg_len: 0,
+            data_len: 0,
+            server_msg: vec![],
+            data: vec![],
+            args: HashMap::new(),
+        };
+        let generic_succ_header: RTHeader = self.next_header(&generic_authz_success);
+
+        let pad = generic_succ_header.compute_md5_pad(self.rt_key);
+        let mut payload = md5_xor(&generic_authz_success.serialize(), &pad);
+        let mut msg = generic_succ_header.serialize();
+        msg.append(&mut payload);
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg).await {
+            Ok(v) => {
+                //println!("Ratchet Debug: Sent {} bytes", v);
+                if self.inc_seqno().is_err() {
+                    return Err("Wrapped sequence number, restart single-session");
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                //println!("Ratchet Error: TCP Error, {}", e);
+                Err("Bad TCP Session")
+            }
+        }
+    }
+
+    pub async fn send_failure_packet(&mut self, stream: &mut TcpStream) -> Result<bool, &str> {
+        let generic_authz_fail = RTAuthorRespPacket {
+            status: RTAuthorStatus::TAC_PLUS_AUTHOR_STATUS_FAIL,
+            arg_cnt: 0,
+            server_msg_len: 0,
+            data_len: 0,
+            server_msg: vec![],
+            data: vec![],
+            args: HashMap::new(),
+        };
+        let generic_fail_header: RTHeader = self.next_header(&generic_authz_fail);
+
+        let pad = generic_fail_header.compute_md5_pad(self.rt_key);
+        let mut payload = md5_xor(&generic_authz_fail.serialize(), &pad);
+        let mut msg = generic_fail_header.serialize();
+        msg.append(&mut payload);
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg).await {
+            Ok(v) => {
+                //println!("Ratchet Debug: Sent {} bytes", v);
+                if self.inc_seqno().is_err() {
+                    return Err("Wrapped sequence number, restart single-session");
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                //println!("Ratchet Error: TCP Error, {}", e);
+                Err("Bad TCP Session")
             }
         }
     }
