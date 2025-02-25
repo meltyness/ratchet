@@ -64,7 +64,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 
 ## Future plans
 - [ ] Logging
-- [ ] authorization
+- [ ] command authorization policy definition
 
 ### Later
 - [ ] CRUD config changes (currently leads to a RwLock order user-count)
@@ -81,6 +81,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 
 ### Done
 
+- [x] authorization
 - [x] ~~beautiful~~ minimalist front-end
   - [x] Containerized distribution
 - [x] complete memory-hardening
