@@ -207,7 +207,8 @@ pub fn main() {
         server_settings.rt_server_user_cmd_policy = custom_user_cmd_policy_cmd.as_str();
 
         rt_obtain_user_policy_terms(server_settings.rt_server_user_cmd_policy, 
-                &mut user_cmd_policy);
+                &mut user_cmd_policy,
+                server_settings.rt_server_i18n);
     }
 
     if env::args().any(|x| x == *"--add-insecure-test-credential-do-not-use".to_string()) {
@@ -282,7 +283,7 @@ async fn tokio_main(custom_hostport: String,
         Err(e) => panic!(
             "Ratchet Error: {} check permissions for user: {:#?}.",
             e,
-            rt_get_user_name()
+            rt_get_system_user_name()
         ),
     };
     // CONTRACT: cargo tests use 'NOWLISTENING' in order to validate server readiness
@@ -294,10 +295,10 @@ async fn tokio_main(custom_hostport: String,
         unsafe {
             ctrlc::set_handler(move || {
             //println!("Ratchet Debug: Average dispatch time over {} RUNS: {:#?}", rt_get_runs(), Duration::from_secs_f64(rt_get_avg() / rt_get_runs()));
-            println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
+            //println!("Ratchet Debug: total rate: {} RUNS / sec", RUNS / (Instant::now() - FIRST_RUN.unwrap()).as_secs_f64());
                 exit(0);
             })
-            .expect("Error setting Ctrl-C handler");
+            .expect("Ratchet Fatal: Error setting Ctrl-C handler");
         }
     }
 
@@ -316,10 +317,12 @@ async fn tokio_main(custom_hostport: String,
     rt_launch_long_polling_process(server_settings.rt_server_i18n,
          server_settings.rt_server_read_clients.to_string(),
          server_settings.rt_server_read_creds.to_string(),
+         server_settings.rt_server_user_cmd_policy.to_string(),
          server_settings.rt_server_long_poll.to_string(), 
          poll_creds, 
          pollv4_clients,
-         pollv6_clients);
+         pollv6_clients,
+        poll_user_policy);
 
     loop {
         let stream = listener.accept().await;
@@ -347,13 +350,13 @@ async fn tokio_main(custom_hostport: String,
             let mut stream = match stream {
                 Ok((s, peer_addr)) => {
                     // TODO: Collect this into session info so that the following diagnostic logs can be associated
-                   println!("Ratchet Info: Received connection request from {}",peer_addr);
+                   //println!("Ratchet Debug: Received connection request from {}",peer_addr);
 
                     // This shouldn't be bandwidth-intensive enough, prefer latency optimization and disable Nagle's
                     match s.set_nodelay(true) {
                         Ok(_) => (),
                         Err(_) => {
-                           println!("Ratchet Debug: Couldn't disable Nagles for this Socket, proceeding anyway.");
+                          //println!("Ratchet Debug: Couldn't disable Nagles for this Socket, proceeding anyway.");
                         }
                     };
 
@@ -375,7 +378,7 @@ async fn tokio_main(custom_hostport: String,
                 &v6_binding,
             ) {
                 Ok(s) => {
-                   println!("Ratchet Debug: Again found client, OK {:?}", s);
+                  //println!("Ratchet Debug: Again found client, OK {:?}", s);
                     s
                 },
                 Err(e) => {
@@ -398,7 +401,7 @@ async fn tokio_main(custom_hostport: String,
             // Stage 1: Parse header, establish session
             let hdr: RTHeader = match RTHeader::parse_init_header(&mut stream, 0).await {
                 Ok(h) => {
-                   println!("Ratchet Debug: Processed {:#?}", h);
+                  //println!("Ratchet Debug: Processed {:#?}", h);
                     h
                 }
                 Err(e) => {
@@ -415,11 +418,11 @@ async fn tokio_main(custom_hostport: String,
                     hdr.parse_authen_packet(&mut stream, session_key).await
                 }
                 RTTACType::TAC_PLUS_AUTHOR => {
-                    println!("Ratchet Debug: Processing authz request");
+                   //println!("Ratchet Debug: Processing authz request");
                     hdr.parse_autz_packet(&mut stream, session_key).await
                 }
                 RTTACType::TAC_PLUS_ACCT => {
-                   println!("Ratchet Debug: Not Implemented");
+                  //println!("Ratchet Debug: Not Implemented");
                     let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                     temp_sess.send_error_packet(&mut stream).await;
                     return;
@@ -434,7 +437,7 @@ async fn tokio_main(custom_hostport: String,
                     return;
                 }
                 Ok(d) => {
-                   println!("Ratchet Debug: Processed {:#?}", d);
+                  //println!("Ratchet Debug: Processed {:#?}", d);
                     d
                 }
             };
@@ -445,7 +448,7 @@ async fn tokio_main(custom_hostport: String,
                     RTAuthenPacket::RTAuthenStartPacket(asp) => {
                         match asp.authen_type {
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_ASCII => {
-                               println!("Ratchet Info: Decoded: {}", asp);
+                               //println!("Ratchet Debug: Decoded: {}", asp);
                                let mut authen_sess = RTAuthenSess::from_header(&hdr, session_key);
                                 // (sort of) Authenticate the server before putting a cred on the line
                                 //let mut retries = 0;
@@ -481,7 +484,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent failure packet");
+                                          //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -513,7 +516,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent failure packet");
+                                          //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -521,36 +524,29 @@ async fn tokio_main(custom_hostport: String,
                                     }
                                     return;
                                 }
-                                let username_case_preserved: UsernameCasePreserved =
-                                    UsernameCasePreserved::new();
+                                let username_case_preserved: UsernameCasePreserved = UsernameCasePreserved::new();
                                 let raw_username = obtained_username;
                                 let auth_request_password = obtained_password;
                                 let mut user_authenticated = false;
 
-                               println!("Ratchet Debug: Looking up {}", raw_username);
+                              //println!("Ratchet Debug: Looking up {}", raw_username);
 
-                                let username = if server_settings.rt_server_i18n {
-                                    match username_case_preserved.prepare(raw_username) {
-                                        Ok(fixed_username) => {
-                                           println!("Ratchet Debug: Looking up {}",fixed_username);
-                                            fixed_username
-                                        }
-                                        Err(e) => {
-                                           println!("Ratchet Error: Invalid username passed, {}",e);
-                                            authen_sess.send_error_packet(&mut stream).await;
-                                            return;
-                                        }
+                                let username = match rt_fetch_precis_username(&raw_username.into_bytes(), server_settings.rt_server_i18n){
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        println!("Ratchet Error: Invalid username passed.");
+                                        authen_sess.send_error_packet(&mut stream).await;
+                                        return;
                                     }
-                                } else {
-                                    raw_username.try_into().unwrap()
                                 };
+                                
                                 let creds = credentials_container.read().await;
                                 if let Some(p) = creds.get(&username.to_string()) {
                                     // User known, check authentication success.
-                                   println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
+                                  //println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
                                     user_authenticated = bcrypt::verify(auth_request_password, p);
                                 } else {
-                                   println!("Ratchet Debug: Couldn't find {:#?}, check username",username);
+                                  //println!("Ratchet Debug: Couldn't find {:#?}, check username",username);
                                     // user who? user not authenticated!
                                 }
 
@@ -563,7 +559,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent success packet");
+                                          //println!("Ratchet Debug: Sent success packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -578,7 +574,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent failure packet");
+                                          //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -589,36 +585,25 @@ async fn tokio_main(custom_hostport: String,
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_PAP => {
                                println!("Ratchet Info: Decoded: {}", asp);
                                let mut authen_sess = RTAuthenSess::from_header(&hdr, session_key);
-                                let raw_username = String::from_utf8_lossy(&asp.user);
                                 let auth_request_password = String::from_utf8_lossy(&asp.data);
                                 let mut user_authenticated = false;
 
-                               println!("Ratchet Debug: Looking up {}", raw_username);
-                                let username_case_preserved: UsernameCasePreserved =
-                                    UsernameCasePreserved::new();
-                                let username = if server_settings.rt_server_i18n {
-                                    match username_case_preserved.prepare(raw_username) {
-                                        Ok(fixed_username) => {
-                                           println!("Ratchet Debug: Looking up {}",fixed_username);
-                                            fixed_username
-                                        }
-                                        Err(e) => {
-                                           println!("Ratchet Error: Invalid username passed, {}",e);
-                                            authen_sess.send_error_packet(&mut stream).await;
-                                            return;
-                                        }
+                                let username = match rt_fetch_precis_username(&asp.user, server_settings.rt_server_i18n){
+                                    Ok(u) => u,
+                                    Err(e) => {
+                                        println!("Ratchet Error: Invalid username passed.");
+                                        authen_sess.send_error_packet(&mut stream).await;
+                                        return;
                                     }
-                                } else {
-                                    raw_username
                                 };
 
                                 let creds = credentials_container.read().await;
                                 if let Some(p) = creds.get(&username.to_string()) {
                                     // User known, check authentication success.
-                                   println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
+                                  //println!("Ratchet Debug: Found user with credential, for {:#?}!",username);
                                     user_authenticated = bcrypt::verify(&*auth_request_password, p);
                                 } else {
-                                   println!("Ratchet Debug: Couldn't find {:#?}, check username",username);
+                                  //println!("Ratchet Debug: Couldn't find {:#?}, check username",username);
                                     // user who? user not authenticated!
                                 }
 
@@ -631,7 +616,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent success packet");
+                                          //println!("Ratchet Debug: Sent success packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -646,7 +631,7 @@ async fn tokio_main(custom_hostport: String,
                                         .await
                                     {
                                         Ok(_) => {
-                                           println!("Ratchet Debug: Sent failure packet");
+                                          //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
                                            println!("Ratchet Error: TCP Error, {}", e);
@@ -694,36 +679,19 @@ async fn tokio_main(custom_hostport: String,
                         // default authorize
                         let mut authorization_outcome = true;
 
-                        let name = String::from_utf8_lossy(&rtauthor_request_packet.user);
-                        let username_case_preserved: UsernameCasePreserved = UsernameCasePreserved::new();
+                       //println!("Ratchet Debug: Looking up Authz info for {}", name);
 
-                        println!("Ratchet Debug: Looking up Authz info for {}", name);
-
-                        let username = if server_settings.rt_server_i18n {
-                            match username_case_preserved.prepare(name) {
-                                Ok(fixed_username) => {
-                                println!("Ratchet Debug: Looking up {}",fixed_username);
-                                    fixed_username
-                                }
-                                Err(e) => {
-                                println!("Ratchet Error: Invalid username passed, {}",e);
-                                    match authz_sess.send_failure_packet(&mut stream).await {
-                                        Ok(_) => {
-                                            println!("Ratchet Debug: Unauthorized successfully");
-                                        },
-                                        Err(_) => {
-                                            println!("Ratchet Debug: Error unauthorizing");
-                                        },
-                                    };
-                                    return;
-                                }
+                        let username = match rt_fetch_precis_username(&rtauthor_request_packet.user, server_settings.rt_server_i18n){
+                            Ok(u) => u,
+                            Err(e) => {
+                                println!("Ratchet Error: Invalid username passed.");
+                                authz_sess.send_failure_packet(&mut stream).await;
+                                return;
                             }
-                        } else {
-                            name.try_into().unwrap()
                         };
 
                         if let (Some(policy_list), Some(cmd)) = (policy.get(&username.to_string()),rtauthor_request_packet.reconstruct_command()) {
-                            println!("Ratchet Debug: Found applicable policy for {username}");
+                           //println!("Ratchet Debug: Found applicable policy for {username}");
                             // First match policy against the command
                             match policy_list.0.iter().find(
                                 |&policy_item| {
@@ -736,7 +704,7 @@ async fn tokio_main(custom_hostport: String,
                             ) {
                                 Some(matching_policy_item) => {
                                     // TODO: this should be prioritized against other policy applicable
-                                    println!("Ratchet Debug: Found match via {matching_policy_item:?}");
+                                   //println!("Ratchet Debug: Found match via {matching_policy_item:?}");
                                     match matching_policy_item.outcome {
                                         RTPolicyOutcome::Permit => {authorization_outcome = true;},
                                         RTPolicyOutcome::Reject => {authorization_outcome = false;},
@@ -750,19 +718,19 @@ async fn tokio_main(custom_hostport: String,
                         if authorization_outcome {
                             match authz_sess.send_success_packet(&mut stream).await {
                                 Ok(_) => {
-                                    println!("Ratchet Debug: Authorized successfully");
+                                   //println!("Ratchet Debug: Authorized successfully");
                                 },
                                 Err(_) => {
-                                    println!("Ratchet Debug: Error authorizing");
+                                   //println!("Ratchet Debug: Error authorizing");
                                 },
                             };
                         } else {
                             match authz_sess.send_failure_packet(&mut stream).await {
                                 Ok(_) => {
-                                    println!("Ratchet Debug: Unauthorized successfully");
+                                   //println!("Ratchet Debug: Unauthorized successfully");
                                 },
                                 Err(_) => {
-                                    println!("Ratchet Debug: Error unauthorizing");
+                                   //println!("Ratchet Debug: Error unauthorizing");
                                 },
                             };
                         }
@@ -770,8 +738,8 @@ async fn tokio_main(custom_hostport: String,
                     },
                     ratchet::RTAuthorPacket::RTAuthorRespPacket(rtauthor_resp_packet) => {
                         // TODO: this should be a temp author sess.
-                        let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
-                        temp_sess.send_error_packet(&mut stream).await;
+                        let mut temp_sess = RTAutzSess::from_header(&hdr, session_key);
+                        temp_sess.send_failure_packet(&mut stream).await;
                         return;
                     },
                 }
@@ -795,10 +763,11 @@ async fn tokio_main(custom_hostport: String,
 /// The long polling process consumes an API
 /// which signals to ratchet when any update is
 /// available to the clients or creds.
-fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_cmd: String, long_poll_cmd: String,
+fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_cmd: String, user_policy_cmd: String, long_poll_cmd: String,
                                 poll_creds: Arc<RwLock<HashMap<String, String>>>,
                                 pollv4_clients: Arc<RwLock<[HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33]>>,
-                                pollv6_clients: Arc<RwLock<[HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129]>>) {
+                                pollv6_clients: Arc<RwLock<[HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129]>>,
+                                poll_user_cmd_policy: Arc<RwLock<HashMap<String, RTPolicy>>>) {
     tokio::spawn(async move {
         let v4_container = pollv4_clients.clone();
         let v6_container = pollv6_clients.clone();
@@ -828,7 +797,7 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
             };
 
             let text_response = output.wait_with_output().expect("Failed to open STDOUT");
-            println!("Ratchet Info: Saw {:?} from Long Poll command.", text_response.stdout);
+            //println!("Ratchet Debug: Saw {:?} from Long Poll command.", text_response.stdout);
             if text_response.stdout.len() > 7 { // "U p d a t e _ \d+ \n"
                 // if we detect that we're on an updated server, send serial updates in the future
                 send_serial = true;
@@ -842,9 +811,11 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
                 match u64::from_str_radix(&String::from_utf8_lossy(&s_num_text_b10), 10) {
                     Ok(n) => {
                         update_serial = n;
-                        println!("Ratchet Info: Computed {n} planning to send serial: {send_serial}");
+                        //println!("Ratchet Debug: Computed {n} planning to send serial: {send_serial}");
                     },
-                    Err(_) => {update_serial = 0; send_serial = false; println!("Ratchet Info: Issue parsing serial, reverting to old behavior.")},
+                    Err(_) => {update_serial = 0; send_serial = false; 
+                        println!("Ratchet Info: Issue parsing serial, reverting to old behavior.")
+                    },
                 }
             }        
 
@@ -852,6 +823,7 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
             let mut clients_v4 = v4_container.write().await;
             let mut clients_v6 = v6_container.write().await;
             let mut credentials = creds_ctr.write().await;
+            let mut user_policy = poll_user_cmd_policy.write().await;
             clients_v4.iter_mut().for_each(|h| h.clear());
             clients_v6.iter_mut().for_each(|h| h.clear());
             credentials.clear();
@@ -865,9 +837,33 @@ fn rt_launch_long_polling_process(server_i18n: bool, clients_cmd: String, cred_c
                 &mut credentials,
                 server_i18n,
             );
+            rt_obtain_user_policy_terms(
+                &user_policy_cmd, 
+                &mut user_policy,
+                server_i18n
+            );
            println!("Ratchet Info: Poll-directed update applied.");
         }
     });
+}
+
+fn rt_fetch_precis_username(packet_text: &Vec<u8>, i18n: bool) -> Result<String, &str> {
+    let raw_username = String::from_utf8_lossy(&packet_text);
+    if i18n {
+        //println!("Ratchet Debug: Looking up {}", raw_username);
+        let username_case_preserved: UsernameCasePreserved = UsernameCasePreserved::new();
+        match username_case_preserved.prepare(raw_username) {
+            Ok(fixed_username) => {
+              //println!("Ratchet Debug: Looking up {}",fixed_username);
+                Ok(fixed_username.to_string())
+            }
+            Err(e) => {
+                Err("Ratchet Error: Bad username passed")
+            }
+        }
+    } else {        
+        Ok(raw_username.to_string())
+    }
 }
 
 /// rt_fetch_secret performs the routing lookup to
@@ -877,18 +873,18 @@ fn rt_fetch_secret<'a>(
     clients_v4: &'a [HashMap<u32, ProtectedBox<SecureVec<u8>>>; 33],
     clients_v6: &'a [HashMap<u128, ProtectedBox<SecureVec<u8>>>; 129],
 ) -> Result<&'a ProtectedBox<SecureVec<u8>>, &'a str> {
-   println!("Ratchet Debug: Thumbing through {:#?} and {:#?}",clients_v4, clients_v6);
+  //println!("Ratchet Debug: Thumbing through {:#?} and {:#?}",clients_v4, clients_v6);
     match ip {
         std::net::IpAddr::V4(ipv4_addr) => {
-           println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
+          //println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
             let addr = ipv4_addr.to_bits();
             let mut mask = 0xFFFFFFFFu32;
             let mut i = 0;
             while i <= 32 {
-               println!("Ratchet Debug: Masking result: {}", (addr & mask));
+              //println!("Ratchet Debug: Masking result: {}", (addr & mask));
                 match clients_v4[32 - i].get(&(addr & mask)) {
                     Some(str) => {
-                       println!("Ratchet Debug: Found with {:?}", str);
+                      //println!("Ratchet Debug: Found with {:?}", str);
                         return Ok(str);
                     }
                     None => (),
@@ -900,15 +896,15 @@ fn rt_fetch_secret<'a>(
         }
         std::net::IpAddr::V6(ipv6_addr) => match ipv6_addr.to_ipv4_mapped() {
             Some(ipv4_addr) => {
-               println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
+              //println!("Ratchet Debug: Seeking out {}", ipv4_addr.to_bits());
                 let addr = ipv4_addr.to_bits();
                 let mut mask = 0xFFFFFFFFu32;
                 let mut i = 0;
                 while i <= 32 {
-                   println!("Ratchet Debug: Masking result: {}", (addr & mask));
+                  //println!("Ratchet Debug: Masking result: {}", (addr & mask));
                     match clients_v4[32 - i].get(&(addr & mask)) {
                         Some(str) => {
-                           println!("Ratchet Debug: Found with {:?}", str);
+                          //println!("Ratchet Debug: Found with {:?}", str);
                             return Ok(str);
                         }
                         None => (),
@@ -919,7 +915,7 @@ fn rt_fetch_secret<'a>(
                 Err("Unknown client")
             }
             None => {
-               println!("Ratchet Debug: Seeking out {}", ipv6_addr.to_bits());
+              //println!("Ratchet Debug: Seeking out {}", ipv6_addr.to_bits());
                 let addr = ipv6_addr.to_bits();
                 let mut mask = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFu128;
                 let mut i = 0;
@@ -943,7 +939,8 @@ fn rt_fetch_secret<'a>(
 /// 
 /// no, saying 'policy' does not mean the kernel contains policy.
 fn rt_obtain_user_policy_terms(policy_cmd: &str, 
-    user_group_policies: &mut HashMap<String, RTPolicy>) {
+    user_group_policies: &mut HashMap<String, RTPolicy>,
+    i18n: bool) {
     let (prog, arg1) = match cfg!(target_os = "windows") {
         true => ("cmd", "/C"),
         false => ("sh", "-c")
@@ -952,7 +949,7 @@ fn rt_obtain_user_policy_terms(policy_cmd: &str,
         .arg(arg1)
         .arg(policy_cmd)
         .output()
-        .expect("Failed to execute configured command.");
+        .expect("Ratchet Fatal: Failed to execute configured command.");
 
     let data_str = String::from_utf8_lossy(&output.stdout);
 
@@ -972,23 +969,31 @@ fn rt_obtain_user_policy_terms(policy_cmd: &str,
     let mut new_policy = HashMap::new();
     let mut collected_users = vec![];
     for line in data_str.lines() {
-        println!("Ratchet Debug: Parsing policy line: {line}");
+       //println!("Ratchet Debug: Parsing policy line: {line}");
         match parser_state {
             PolicyParserState::Free => {
-                println!("Ratchet Debug: In state free");
+               //println!("Ratchet Debug: In state free");
                 if line == "$" { parser_state = PolicyParserState::Subject(vec![]); }
             },
             PolicyParserState::Subject(ref mut users) => {
-                println!("Ratchet Debug: In state subject");
+               //println!("Ratchet Debug: In state subject");
                 if line == "(" { 
                     collected_users = users.clone(); 
                     parser_state = PolicyParserState::Policy(vec![]); 
                 } else { 
-                    users.push(line.to_string()); 
+                    // do precis rewriting on subjects
+                    match rt_fetch_precis_username(&line.as_bytes().to_vec(), i18n){
+                        Ok(u) => {
+                            users.push(u); 
+                        },
+                        Err(e) => {
+                            println!("Ratchet Error: Invalid username passed.");
+                        }
+                    };
                 }
             },
             PolicyParserState::Policy(ref mut items) => {
-                println!("Ratchet Debug: In state close");
+               //println!("Ratchet Debug: In state close");
                 if line == ")" {
                     collected_users.drain(..).for_each(
                         |name| {
@@ -1011,7 +1016,7 @@ fn rt_obtain_user_policy_terms(policy_cmd: &str,
     // Formatted policy must terminate all policy definitions
     match parser_state {
         PolicyParserState::Free => {
-            println!("Ratchet Debug: File format incorrect, terminating policy parsing");
+           //println!("Ratchet Debug: File format incorrect, terminating policy parsing");
         },
         _ => {return;}
     }
@@ -1019,15 +1024,15 @@ fn rt_obtain_user_policy_terms(policy_cmd: &str,
     user_group_policies.clear();
     new_policy.drain()
               .for_each(|z| {user_group_policies.insert(z.0, z.1);});
-    println!("Ratchet Debug: Processed into {user_group_policies:#?}");
+   //println!("Ratchet Debug: Processed into {user_group_policies:#?}");
 }
 
 fn rt_parse_policy_text(text: &str, logging: bool) -> Option<RTPolicyEntry> {
     let entries = text.split(|z| z as u8 == b',')
         .take(5)
         .collect::<Vec<&str>>();
-    println!("Ratchet Debug: Parsing policy text got {} with {}", text, entries.len());
-    if entries.len() == 5 {
+   //println!("Ratchet Debug: Parsing policy text got {} with {}", text, entries.len());
+    if entries.len() >= 5 {
         let prec = match usize::from_str(entries[0]) {
             Ok(v) => v,
             Err(_) => {return None;},
@@ -1105,7 +1110,7 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
             let username = if server_i18n {
                 match username_case_preserved.prepare(key) {
                     Ok(fixed_username) => {
-                       println!("Ratchet Debug: Looking up {}", fixed_username);
+                      //println!("Ratchet Debug: Looking up {}", fixed_username);
                         fixed_username.to_string()
                     }
                     Err(e) => {
@@ -1117,7 +1122,7 @@ fn rt_obtain_creds(cmd: &str, creds_out: &mut HashMap<String, String>, server_i1
                 key
             };
 
-           println!("Ratchet Debug: Installed user {}", username);
+          //println!("Ratchet Debug: Installed user {}", username);
             let value = parts[1].to_string();
 
             if rt_validate_hash(&value) {
@@ -1141,7 +1146,7 @@ fn rt_validate_hash(hash_tested: &String) -> bool {
         .skip(1)
         .enumerate()
         .all(|(idx, next)| {
-           println!("Ratchet Debug: Validating hash with {idx} predicate and {next}");
+          //println!("Ratchet Debug: Validating hash with {idx} predicate and {next}");
             match idx {
                 // Bcrypt variant identity
                 0 => next == "2b",
@@ -1164,7 +1169,7 @@ fn rt_validate_hash(hash_tested: &String) -> bool {
                                 || c == '/')
                         }) {
                             Some(weird_char) => {
-                               println!("Ratchet Debug: I have an issue with: {:?}", weird_char);
+                              //println!("Ratchet Debug: I have an issue with: {:?}", weird_char);
                                 false
                             }
                             None => true,
@@ -1208,9 +1213,9 @@ fn rt_obtain_clients(
         .arg(cmd)
         .stdout(Stdio::piped())
         .spawn()
-        .expect("Failed to execute configured command.");
+        .expect("Ratchet Fatal: Failed to execute configured command.");
 
-    output.wait().expect("Client creds command failed");
+    output.wait().expect("Ratchet Fatal: Client creds command failed");
     
     let data_str = 
     SecureVec::from_iter_in(output.stdout.take()
@@ -1266,7 +1271,7 @@ fn rt_obtain_clients(
                             let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                             v4_clients_out[netmask].insert(int_address, value);
                         } else {
-                           println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}",key);
+                          //println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}",key);
                         }
                     }
                 }
@@ -1290,22 +1295,21 @@ fn rt_obtain_clients(
                                     let value = ProtectedBox::from(SecureVec::from(parts[1])); // keys can contain spaces in some implementations
                                     v6_clients_out[netmask].insert(int_address, value);
                                 } else {
-                                   println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}", key);
+                                  //println!("Ratchet Debug: Bad netmask, or bad network address, skipping {}", key);
                                 }
                             }
                         }
                         Err(_) => {
                             // Not IPv4 or IPv6 ... discarding.
-                           println!("Ratchet Debug: Bad input, or bad network address, skipping {}",key);
+                          //println!("Ratchet Debug: Bad input, or bad network address, skipping {}",key);
                         }
                     }
                 }
             };
 
-           println!("Ratchet Debug: Installed client {}", key);
+          //println!("Ratchet Debug: Installed client {}", key);
         } else {
-           println!("Ratchet Warning: Invalid network/client passed around {}",line_ct);
-           println!("Ratchet Warning: Expected 2 parts, found {}", parts.len());
+           println!("Ratchet Warning: Invalid network/client passed around {}. Expected 2 parts, found {}",line_ct, parts.len());
             continue;
         }
 
@@ -1324,7 +1328,7 @@ unsafe fn rt_get_runs() -> f64 {
 
 /// In case of failure to open a socket, get some environment
 /// info from the system we're running on.
-fn rt_get_user_name() -> String {
+fn rt_get_system_user_name() -> String {
     return match if cfg!(target_os = "windows") {
         Command::new("cmd").args(["/C", "whoami"]).output()
     } else {
