@@ -77,9 +77,13 @@ fn end_to_end_test_auth_unicode() {
             .expect("Failed to kill the ratchet application");
 
         let mut server_msg = String::new();
-        match child.stdout.take().unwrap().read_to_string(&mut server_msg){
+        match child.stdout.take().unwrap().read_to_string(&mut server_msg) {
             Ok(_) => (),
-            Err(e) => assert!(false, "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output: none available\n", stdout, stderr),
+            Err(e) => assert!(
+                false,
+                "Nah, that ain't it, chief. {} \n Testing Framework Errors: {} \n Server output: none available\n",
+                stdout, stderr
+            ),
         }
         assert!(
             false,
