@@ -54,7 +54,8 @@ Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encode
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
-`RATCHET_LONG_POLL` is a command that should complete when an upstream server wants to signal to ratchet that clients, creds, etc. have update.
+`RATCHET_LONG_POLL` is a command that should complete when an upstream server wants to signal to ratchet that clients, creds, etc. have updates. 
+- There's also a trivial long-polling protocol involving a serial that can be used to provide a minimal asynchronous update with ratchet as the subscriber to any available changes.
 
 `RATCHET_USER_CMD_POLICY` can, similarly, be used to incorporate a file for Command Authorization processing:
 
