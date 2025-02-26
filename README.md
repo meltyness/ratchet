@@ -101,8 +101,8 @@ Each policy ACE for a matched user is processed in-order on a first-matched basi
 Failure modes:
 - If users are duplicated in multiple policies, they will inherit the last-defined policy.
 - If any policy is not completed, or invalid, then no policy update will take place.
- - To include invalid usernames, misplaced field symbols, unknown field symbols, not enough commas.
-- So in short, during updates and init if an invalid policy is provided, the last valid policy provided with remain in place.
+    - To include invalid usernames, misplaced field symbols, unknown field symbols, not enough commas.
+- So in short, during updates and initialization, if an invalid policy is provided; then, the last valid policy provided with remain in place.
 
 `POLICY_ACE` := `PRECEDENCE`,`POLICY_OUTCOME`,`CRITERIA`,`BLANK/RESERVED`,`TEXT_DATA`
 
