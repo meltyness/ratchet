@@ -48,15 +48,20 @@ RATCHET_READ_CLIENTS="./clients_cmd.sh" \
  RATCHET_CUST_HOSTPORT="[::]:49" \
  ./target/release/ratchet
 ```
+#### Clients and Creds
 Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encoded CSV list onto stdout with the following formal-looking line format:
 
 `CLIENTS` := `(` `V4_CIDR_SUBNET|V6_CIDR_SUBNET` `,` `PLAINTEXT KEY` `\n` `)+`
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
+Don't repeat keys (i.e., specific subnets, specific usernames), sorry.
+
+#### Long polling / update server
 `RATCHET_LONG_POLL` is a command that should complete when an upstream server wants to signal to ratchet that clients, creds, etc. have updates. 
 - There's also a trivial long-polling protocol involving a serial that can be used to provide a minimal asynchronous update with ratchet as the subscriber to any available changes.
 
+#### Command Authorization Policies
 `RATCHET_USER_CMD_POLICY` can, similarly, be used to incorporate a file for Command Authorization processing:
 
 So the `RATCHET_USER_CMD_POLICY` should deliver a file with the following formal-looking file format:
@@ -101,7 +106,7 @@ Failure modes:
 
 `TEXT_DATA` := An arbitrary string to match against.
 
-#### Policy example
+##### Policy example
 ```
 $
 username
@@ -114,9 +119,17 @@ username
 ```
 **Translation**: The user `username` can run commands starting with `show`, cannot run commands starting with `reload` or `ping`, and finally, may not run any other command.
 
-Don't repeat keys (i.e., specific subnets, specific usernames), sorry.
-
+#### Simplest possible implementation
 If you want to do something cheeky like make `RATCHET_READ_CLIENTS="echo '10.10.2.20/32,testing123'` or `RATCHET_READ_CREDS=cat clients_lists.txt` that's fine, I'm easy.
+
+ratchet defines the following defaults:
+```rs
+        "cat /dev/null",
+        "cat /dev/null",
+        "sleep inf",
+        "echo",
+```
+corresponding to no clients, no creds, polling that never progresses, and a blank policy, so any environment variables that aren't defined have safe reasonable defaults.
 
 ### Testing
 In order to run the unit tests you'll need something like. They're far from comprehensive across system configuration.
