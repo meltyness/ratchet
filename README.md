@@ -43,6 +43,7 @@ sudo setcap CAP_NET_BIND_SERVICE=+ep ./target/release/ratchet
 
 RATCHET_READ_CLIENTS="./clients_cmd.sh" \
  RATCHET_READ_CREDS="./creds_cmd.sh" \
+ RATCHET_USER_CMD_POLICY="./user_cmd_policy_cmd.sh" \
  RATCHET_CUST_HOSTPORT="[::]:49" \
  ./target/release/ratchet
 ```
@@ -52,6 +53,10 @@ Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encode
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
+`RATCHET_USER_CMD_POLICY` can, similarly, be used to incorporate a file for Command Authorization processing:
+
+So the `RATCHET_USER_CMD_POLICY` should deliver a file with the following formal-looking file format:
+
 `USER_CMD_POLICY` := 
 ```
 $
@@ -60,9 +65,11 @@ user1
 user2
 admin
 (
-<POLICY ACE>
+<POLICY_ACE>
 )
 ```
+
+So `$` on a line, alone, breaks processing into `subjects` and the `(`, `)` denote the actual set of policy access control entries (ACE):
 
 `POLICY_ACE` := `PRECEDENCE`,`POLICY_OUTCOME`,`CRITERIA`,`BLANK/RESERVED`,`TEXT_DATA`
 
