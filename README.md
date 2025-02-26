@@ -75,6 +75,9 @@ user2
 admin
 (
 <POLICY_ACE>
+<POLICY_ACE>
+<POLICY_ACE>
+...
 )
 
 $
@@ -84,11 +87,16 @@ user4
 guest
 (
 <POLICY_ACE>
+<POLICY_ACE>
+<POLICY_ACE>
+...
 )
 ...
 ```
 
 So `$` on a line, alone, breaks processing into `subjects` and the `(`, `)` denote the actual set of policy access control entries (ACE).
+
+Each policy is processed in-order on a first matched basis, and in the absence of a match, authorization is default permitted. 
 
 Failure modes:
 - If users are duplicated in multiple policies, they will inherit the last-defined policy.
@@ -139,6 +147,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 
 ## Future plans
 - [ ] Logging
+- [ ] Unauthenticated command authorization policy
 - [ ] Device-based command authorization
 - [ ] Central command logging based on a policy
 
