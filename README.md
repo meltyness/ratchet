@@ -11,7 +11,7 @@ Look! It's an Axe! No, a hatchet!
 ## Introduction
 This is a TACACS+ server.
 
-It implements PAP and ASCII.
+It implements PAP, ASCII Authentication, and a basic policy evaluation that seems to support Command Authorization.
 
 It's written in a memory-safe language, and has very few dependencies.
 
