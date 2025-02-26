@@ -354,12 +354,11 @@ async fn tokio_main(
 
         // benchmarking
         if server_settings.rt_perf_bench {
-            let start_time = Instant::now();
             unsafe {
                 let _ = RUNS.fetch_update(atomic::Ordering::Relaxed, atomic::Ordering::Relaxed, |a| Some(a+1));
                 match FIRST_RUN {
                     Some(_) => (),
-                    None => FIRST_RUN = Some(start_time.clone()),
+                    None => FIRST_RUN = Some(Instant::now()),
                 }
             }
         }
@@ -392,6 +391,8 @@ async fn tokio_main(
                 }
             };
 
+            let peer_fstring = format!("{:?}", stream.peer_addr());
+
             // Stage 0.5: Determine if this is a client
             // TODO: completely encapsulate this into the session eventually...
             let v4_binding = clients_v4_container.read().await;
@@ -406,7 +407,7 @@ async fn tokio_main(
                     s
                 }
                 Err(e) => {
-                    println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
+                    println!("Ratchet Warning: Unknown client, {peer_fstring}");
                     return;
                 }
             };
@@ -416,7 +417,7 @@ async fn tokio_main(
             session_key.expose_read(|thing| secret_is_blank = thing.len() == 0);
 
             if secret_is_blank {
-                println!("Ratchet Warning: Unknown client, {:#?}", stream.peer_addr());
+                println!("Ratchet Warning: Unknown client, {peer_fstring}");
                 return;
             }
 
@@ -427,7 +428,7 @@ async fn tokio_main(
                     h
                 }
                 Err(e) => {
-                    println!("Ratchet Error: {}", e);
+                    println!("Ratchet Error: {} check client {peer_fstring}", e);
                     //authen_sess.send_error_packet( &mut stream);
                     return;
                 }
@@ -443,7 +444,7 @@ async fn tokio_main(
                     hdr.parse_autz_packet(&mut stream, session_key).await
                 }
                 RTTACType::TAC_PLUS_ACCT => {
-                    //println!("Ratchet Debug: Not Implemented");
+                    println!("Ratchet Warning: Accounting Not Implemented from {peer_fstring}");
                     let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                     temp_sess.send_error_packet(&mut stream).await;
                     return;
@@ -452,9 +453,19 @@ async fn tokio_main(
 
             let decoded: RTDecodedPacket = match contents {
                 Err(e) => {
-                    println!("Ratchet Error: {}", e);
-                    let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
-                    temp_sess.send_error_packet(&mut stream).await;
+                    println!("Ratchet Error: {} check TACACS+ key for {peer_fstring}", e);
+                    match hdr.tacp_hdr_type {
+                        RTTACType::TAC_PLUS_AUTHEN => {
+                            let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
+                            temp_sess.send_error_packet(&mut stream).await;
+                        },
+                        RTTACType::TAC_PLUS_AUTHOR => {
+                            let mut authz_sess = RTAutzSess::from_header(&hdr, session_key);
+                            authz_sess.send_error_packet(&mut stream).await;
+                            return;
+                        },
+                        RTTACType::TAC_PLUS_ACCT => {},
+                    }
                     return;
                 }
                 Ok(d) => {
@@ -508,7 +519,7 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                     return;
@@ -540,7 +551,7 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                     return;
@@ -588,7 +599,7 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent success packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                 } else {
@@ -603,13 +614,13 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                 }
                             }
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_PAP => {
-                                println!("Ratchet Info: Decoded: {}", asp);
+                                //println!("Ratchet Debug: Decoded: {}", asp);
                                 let mut authen_sess = RTAuthenSess::from_header(&hdr, session_key);
                                 let auth_request_password = String::from_utf8_lossy(&asp.data);
                                 let mut user_authenticated = false;
@@ -649,7 +660,7 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent success packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                 } else {
@@ -664,25 +675,25 @@ async fn tokio_main(
                                             //println!("Ratchet Debug: Sent failure packet");
                                         }
                                         Err(e) => {
-                                            println!("Ratchet Error: TCP Error, {}", e);
+                                            println!("Ratchet Error: TCP Error, {} with {peer_fstring}", e);
                                         }
                                     }
                                 }
                             }
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_CHAP => {
-                                println!("Unknown Packet Format");
+                                println!("Ratchet Error: Unknown Packet Format, CHAP, from {peer_fstring}");
                                 let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                                 temp_sess.send_error_packet(&mut stream).await;
                                 return;
                             }
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAP => {
-                                println!("Unknown Packet Format");
+                                println!("Ratchet Error: Unknown Packet Format, MSCHAP, from {peer_fstring}");
                                 let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                                 temp_sess.send_error_packet(&mut stream).await;
                                 return;
                             }
                             ratchet::RTAuthenPacketType::TAC_PLUS_AUTHEN_TYPE_MSCHAPV2 => {
-                                println!("Unknown Packet Format");
+                                println!("Ratchet Error: Unknown Packet Format, MSCHAPv2, from {peer_fstring}");
                                 let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                                 temp_sess.send_error_packet(&mut stream).await;
                                 return;
@@ -690,13 +701,13 @@ async fn tokio_main(
                         }
                     }
                     RTAuthenPacket::RTAuthenReplyPacket(rtauthen_reply_packet) => {
-                        println!("Ratchet Error: umm... no, I'M the server.");
+                        println!("Ratchet Error: Unexpected Authen Reply Packet from {peer_fstring}");
                         let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                         temp_sess.send_error_packet(&mut stream).await;
                         return;
                     }
                     RTAuthenPacket::RTAuthenContinuePacket(rtauthen_continue_packet) => {
-                        println!("Ratchet Error: Unexpected continue packet!!");
+                        println!("Ratchet Error: Unexpected Authen Continue Packet from {peer_fstring}");
                         let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                         temp_sess.send_error_packet(&mut stream).await;
                         return;
@@ -718,14 +729,7 @@ async fn tokio_main(
                             Ok(u) => u,
                             Err(e) => {
                                 println!("Ratchet Error: Invalid username passed.");
-                                match authz_sess.send_failure_packet(&mut stream).await {
-                                    Ok(_) => {
-                                        //println!("Ratchet Debug: Unauthorized successfully");
-                                    }
-                                    Err(_) => {
-                                        //println!("Ratchet Debug: Error unauthorizing");
-                                    }
-                                }
+                                authz_sess.send_error_packet(&mut stream).await;
                                 return;
                             }
                         };
@@ -784,19 +788,12 @@ async fn tokio_main(
                     ratchet::RTAuthorPacket::RTAuthorRespPacket(rtauthor_resp_packet) => {
                         // TODO: this should be a temp author sess.
                         let mut temp_sess = RTAutzSess::from_header(&hdr, session_key);
-                        match temp_sess.send_failure_packet(&mut stream).await {
-                            Ok(_) => {
-                                //println!("Ratchet Debug: Unauthorized successfully");
-                            }
-                            Err(_) => {
-                                //println!("Ratchet Debug: Error unauthorizing");
-                            }
-                        }
+                        temp_sess.send_error_packet(&mut stream).await;
                         return;
                     }
                 },
                 _ => {
-                    println!("Unknown Packet Format");
+                    println!("Ratchet Error: Unexpected Accounting Packet Format from {peer_fstring}");
                     let mut temp_sess = RTAuthenSess::from_header(&hdr, session_key);
                     temp_sess.send_error_packet(&mut stream).await;
                     return;

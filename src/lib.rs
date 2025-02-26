@@ -671,7 +671,7 @@ impl RTAuthenReplyPacket {
         Self {
             status: TAC_PLUS_AUTHEN_STATUS_ERROR,
             flags: 0,
-            server_msg_len: 67,
+            server_msg_len: 66,
             data_len: 0,
             server_msg: "Unsupported Feature or Malformed Request; please see ratchet docs."
                 .bytes()
@@ -1137,6 +1137,22 @@ impl_from_byte!(
     TAC_PLUS_AUTHOR_STATUS_FOLLOW
 );
 
+impl RTAuthorRespPacket {
+    pub fn get_error_packet() -> Self {
+        Self {
+            status: RTAuthorStatus::TAC_PLUS_AUTHOR_STATUS_ERROR,
+            arg_cnt: 0,
+            server_msg_len: 66,
+            data_len: 0,
+            server_msg: "Unsupported Feature or Malformed Request; please see ratchet docs."
+                .bytes()
+                .collect(),
+            data: vec![],
+            args: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RTAcctPacket {}
 
@@ -1433,6 +1449,30 @@ impl<'a> RTAutzSess<'a> {
             Err(e) => {
                 //println!("Ratchet Error: TCP Error, {}", e);
                 Err("Bad TCP Session")
+            }
+        }
+    }
+
+    pub async fn send_error_packet(&mut self, stream: &mut TcpStream) -> bool {
+        let generic_error = RTAuthorRespPacket::get_error_packet();
+        let generic_error_header: RTHeader = self.next_header(&generic_error);
+
+        let pad = generic_error_header.compute_md5_pad(self.rt_key);
+        let mut payload = md5_xor(&generic_error.serialize(), &pad);
+        let mut msg = generic_error_header.serialize();
+        msg.append(&mut payload);
+        // It's just a header, it shouldn't reveal anything interesting.
+        match stream.write(&msg).await {
+            Ok(v) => {
+                //println!("Ratchet Debug: Sent {} bytes", v);
+                if self.inc_seqno().is_err() {
+                    return false;
+                }
+                true
+            }
+            Err(e) => {
+                //println!("Ratchet Error: TCP Error, {}", e);
+                false
             }
         }
     }
