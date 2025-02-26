@@ -129,7 +129,8 @@ username
 ```
 **Translation**: The user `username` can run commands starting with `show`, cannot run commands starting with `reload` or `ping`, and finally, may not run any other command. 
 
-Note: Policy is only evaluated in the case where the authorization request contains the `cmd` Authorization argument, when `cmd` is included `cmd-arg`s are also evaluated, so as to reconstruct the original command. 
+Protocol Interoperability Note: The User Command Authorization Policy is only evaluated in the case where the Authorization request contains the [RFC8907 Section 8.2](https://www.rfc-editor.org/rfc/rfc8907.html#name-authorization-arguments) referenced `cmd` Authorization argument. 
+In other words, arguments other than `cmd` and `cmd-arg` from clients are disregarded, for example `priv-lvl`, `service`, or `protocol`. And Authorization Requests that do not contain a `cmd` are going to be, as a consequence, permitted by default.
 
 #### Simplest possible implementation
 If you want to do something cheeky like make `RATCHET_READ_CLIENTS="echo '10.10.2.20/32,testing123'` or `RATCHET_READ_CREDS=cat clients_lists.txt` that's fine, I'm easy.
