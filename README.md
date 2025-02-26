@@ -63,11 +63,17 @@ admin
 <POLICY ACE>
 )
 ```
+
 `POLICY_ACE` := `PRECEDENCE`,`POLICY_OUTCOME`,`CRITERIA`,`BLANK/RESERVED`,`TEXT_DATA`
+
 `PRECEDENCE` := An integer `usize`, for when device policies are incorporated.
+
 `POLICY_OUTCOME` := `acc` | `rel`
+
 `CRITERIA` := `<`, `>`, `=` begins with, ends with, and contains; respectively. Use contains sparingly.
+
 `BLANK/RESERVED` := should be blank, ignored, maybe used in the future.
+
 `TEXT_DATA` := An arbitrary string to match against.
 
 #### Policy example
