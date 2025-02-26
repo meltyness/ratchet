@@ -44,6 +44,7 @@ sudo setcap CAP_NET_BIND_SERVICE=+ep ./target/release/ratchet
 RATCHET_READ_CLIENTS="./clients_cmd.sh" \
  RATCHET_READ_CREDS="./creds_cmd.sh" \
  RATCHET_USER_CMD_POLICY="./user_cmd_policy_cmd.sh" \
+ RATCHET_LONG_POLL="sleep inf"
  RATCHET_CUST_HOSTPORT="[::]:49" \
  ./target/release/ratchet
 ```
@@ -52,6 +53,8 @@ Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encode
 `CLIENTS` := `(` `V4_CIDR_SUBNET|V6_CIDR_SUBNET` `,` `PLAINTEXT KEY` `\n` `)+`
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
+
+`RATCHET_LONG_POLL` is a command that should complete when an upstream server wants to signal to ratchet that clients, creds, etc. have update.
 
 `RATCHET_USER_CMD_POLICY` can, similarly, be used to incorporate a file for Command Authorization processing:
 
@@ -67,9 +70,23 @@ admin
 (
 <POLICY_ACE>
 )
+
+$
+a_different_list_of_users
+user3
+user4
+guest
+(
+<POLICY_ACE>
+)
+...
 ```
 
-So `$` on a line, alone, breaks processing into `subjects` and the `(`, `)` denote the actual set of policy access control entries (ACE):
+So `$` on a line, alone, breaks processing into `subjects` and the `(`, `)` denote the actual set of policy access control entries (ACE).
+
+Failure modes:
+- If users are duplicated in multiple policies, they will inherit the last-defined policy.
+- If any policy is not completed, no policy update will take place.
 
 `POLICY_ACE` := `PRECEDENCE`,`POLICY_OUTCOME`,`CRITERIA`,`BLANK/RESERVED`,`TEXT_DATA`
 
