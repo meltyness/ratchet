@@ -145,10 +145,14 @@ ratchet defines the following defaults:
 corresponding to no clients, no creds, polling that never progresses, and a blank policy, so any environment variables that aren't defined have safe reasonable defaults.
 
 ### Testing
-In order to run the unit tests you'll need something like. They're far from comprehensive across system configuration.
-`sudo apt install libauthen-tacacsplus-perl`
+In order to run the unit tests you'll need something like. 
+```bash
+sudo apt install libauthen-tacacsplus-perl
+```
+They tests are not comprehensive, and only provide a basic sanity check for TACACS authentication.
 
-There's future plans to possibly leverage GNS3 so that this system can be tested automatically against arbitrary/proprietary/emulated TACACS clients, but for now some manual testing has it sort of working mostly. 
+There's future plans to possibly leverage GNS3 so that this system can be tested automatically 
+against arbitrary/proprietary/emulated TACACS clients, but for now some manual testing has it sort of working mostly. 
 
 ## Future plans
 - [ ] Logging
