@@ -127,7 +127,9 @@ username
 20,rej,=,,
 )
 ```
-**Translation**: The user `username` can run commands starting with `show`, cannot run commands starting with `reload` or `ping`, and finally, may not run any other command.
+**Translation**: The user `username` can run commands starting with `show`, cannot run commands starting with `reload` or `ping`, and finally, may not run any other command. 
+
+Note: Policy is only evaluated in the case where the authorization request contains the `cmd` Authorization argument, when `cmd` is included `cmd-arg`s are also evaluated, so as to reconstruct the original command. 
 
 #### Simplest possible implementation
 If you want to do something cheeky like make `RATCHET_READ_CLIENTS="echo '10.10.2.20/32,testing123'` or `RATCHET_READ_CREDS=cat clients_lists.txt` that's fine, I'm easy.
