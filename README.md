@@ -96,7 +96,7 @@ guest
 
 So `$` on a line, alone, breaks processing into `subjects` and the `(`, `)` denote the actual set of policy access control entries (ACE).
 
-Each policy is processed in-order on a first matched basis, and in the absence of a match, authorization is default permitted. 
+Each policy ACE for a matched user is processed in-order on a first-matched basis, and in the absence of a match, authorization is default permitted. (see below for an example of default-deny)
 
 Failure modes:
 - If users are duplicated in multiple policies, they will inherit the last-defined policy.
