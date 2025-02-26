@@ -108,7 +108,7 @@ Failure modes:
 
 `PRECEDENCE` := An integer `usize`, for when device policies are incorporated.
 
-`POLICY_OUTCOME` := `acc` | `rel`
+`POLICY_OUTCOME` := `acc` | `rej`
 
 `CRITERIA` := `<`, `>`, `=` begins with, ends with, and contains; respectively. Use contains sparingly.
 
