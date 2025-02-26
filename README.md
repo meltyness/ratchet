@@ -52,6 +52,37 @@ Where `clients_cmd`, `creds_cmd` correspond to a script that puts a UTF-8 encode
 
 `CREDS` := `(` `COMMALESS_USERNAME` `,` `BCRYPT_PASSWORD_HASH` `\n` `)+`
 
+`USER_CMD_POLICY` := 
+```
+$
+a_list_of_users
+user1
+user2
+admin
+(
+<POLICY ACE>
+)
+```
+`POLICY_ACE` := `PRECEDENCE`,`POLICY_OUTCOME`,`CRITERIA`,`BLANK/RESERVED`,`TEXT_DATA`
+`PRECEDENCE` := An integer `usize`, for when device policies are incorporated.
+`POLICY_OUTCOME` := `acc` | `rel`
+`CRITERIA` := `<`, `>`, `=` begins with, ends with, and contains; respectively. Use contains sparingly.
+`BLANK/RESERVED` := should be blank, ignored, maybe used in the future.
+`TEXT_DATA` := An arbitrary string to match against.
+
+#### Policy example
+```
+$
+username
+(
+10,acc,<,,show
+20,rej,<,,reload
+20,rej,<,,ping
+20,rej,=,,
+)
+```
+**Translation**: The user `username` can run commands starting with `show`, cannot run commands starting with `reload` or `ping`, and finally, may not run any other command.
+
 Don't repeat keys (i.e., specific subnets, specific usernames), sorry.
 
 If you want to do something cheeky like make `RATCHET_READ_CLIENTS="echo '10.10.2.20/32,testing123'` or `RATCHET_READ_CREDS=cat clients_lists.txt` that's fine, I'm easy.
@@ -64,7 +95,8 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 
 ## Future plans
 - [ ] Logging
-- [ ] command authorization policy definition
+- [ ] Device-based command authorization
+- [ ] Central command logging based on a policy
 
 ### Later
 - [ ] CRUD config changes (currently leads to a RwLock order user-count)
@@ -82,6 +114,7 @@ There's future plans to possibly leverage GNS3 so that this system can be tested
 ### Done
 
 - [x] authorization
+- [x] command authorization policy definition
 - [x] ~~beautiful~~ minimalist front-end
   - [x] Containerized distribution
 - [x] complete memory-hardening
