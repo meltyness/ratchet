@@ -9,6 +9,11 @@ Look! It's an Axe! No, a hatchet!
 ... it's RATCHET!
 
 ## Introduction
+> [!NOTE]
+> This is only the lightweight configurable AAA backend,
+> if you want a fully-integrated solution with Docker and a Frontend
+> check out https://github.com/meltyness/ratchet-cycle
+
 This is a TACACS+ server.
 
 It implements PAP, ASCII Authentication, and a basic policy evaluation that seems to support Command Authorization.
