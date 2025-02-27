@@ -8,6 +8,8 @@ Look! It's an Axe! No, a hatchet!
 
 ... it's RATCHET!
 
+⭐ Featured on [alternativeto.net](https://alternativeto.net/software/meltyness-ratchet/about/)
+
 ## Introduction
 > [!NOTE]
 > This is only the lightweight configurable AAA backend,
