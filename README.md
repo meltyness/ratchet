@@ -121,7 +121,13 @@ Failure modes:
 
 `BLANK/RESERVED` := should be blank, ignored, maybe used in the future.
 
-`TEXT_DATA` := An arbitrary string to match against.
+`TEXT_DATA` := An arbitrary string to match against. 
+
+> [!NOTE]
+> In implementing `TEXT_DATA` in a policy,
+> platforms may or may not 'unroll' short-hand commands, for example:
+> `rel` applied in global execution mode will unroll to `reload`
+> so in this way wildcard matches aren't necessary.
 
 ##### Policy example
 ```
